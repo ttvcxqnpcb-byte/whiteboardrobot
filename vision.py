@@ -47,24 +47,24 @@ class VisionManager:
             dir_right = vec_right / (marker_width + 1e-5) 
             
             # 你可以在這裡慢慢微調這三個參數
-            motor_fwd = marker_length * 1.3    # 黃色馬達往前凸出的距離
-            body_fwd  = marker_length * 0.7    # 木板前緣的距離
-            body_bwd  = marker_length * 0.9    # 木板/後輪往後延伸的距離
+            motor_fwd   = marker_length * 1.50   # 最前端
+            wheel_start = marker_length * -0.10    # 階梯轉折點
+            body_bwd    = marker_length * 1.05   # 最底端
             
-            motor_side = marker_width * 0.45   # 黃色馬達的側邊寬度 (較窄)
-            wheel_side = marker_width * 1.15   # 黑色輪子的側邊寬度 (較寬)
+            # --- 左右寬度 (X軸) ---
+            narrow_side = marker_width * 0.75     # 前半部窄區寬度
+            wheel_side  = marker_width * 1.0    # 後半部寬區寬度
             
-            # 2. 依序推算 8 個頂點 (從左前馬達尖端開始，順時針繞一圈)
-            pt1 = center + (dir_forward * motor_fwd) - (dir_right * motor_side) # 左前馬達尖端
-            pt2 = center + (dir_forward * motor_fwd) + (dir_right * motor_side) # 右前馬達尖端
-            pt3 = center + (dir_forward * body_fwd)  + (dir_right * motor_side) # 右前馬達根部 (內縮)
-            pt4 = center + (dir_forward * body_fwd)  + (dir_right * wheel_side) # 右側木板前緣 (外擴)
-            pt5 = center - (dir_forward * body_bwd)  + (dir_right * wheel_side) # 右後黑輪底緣
-            pt6 = center - (dir_forward * body_bwd)  - (dir_right * wheel_side) # 左後黑輪底緣
-            pt7 = center + (dir_forward * body_fwd)  - (dir_right * wheel_side) # 左側木板前緣 (外擴)
-            pt8 = center + (dir_forward * body_fwd)  - (dir_right * motor_side) # 左前馬達根部 (內縮)
+            # 2. 依序推算 8 個頂點 (從左前頂端開始，順時針繞一圈)
+            pt1 = center + (dir_forward * motor_fwd)   - (dir_right * narrow_side) # 1. 左前頂點
+            pt2 = center + (dir_forward * motor_fwd)   + (dir_right * narrow_side) # 2. 右前頂點
+            pt3 = center + (dir_forward * wheel_start) + (dir_right * narrow_side) # 3. 右側準備變寬的內角
+            pt4 = center + (dir_forward * wheel_start) + (dir_right * wheel_side)  # 4. 右側輪胎前緣的外角
+            pt5 = center - (dir_forward * body_bwd)    + (dir_right * wheel_side)  # 5. 右後輪底角
+            pt6 = center - (dir_forward * body_bwd)    - (dir_right * wheel_side)  # 6. 左後輪底角
+            pt7 = center + (dir_forward * wheel_start) - (dir_right * wheel_side)  # 7. 左側輪胎前緣的外角
+            pt8 = center + (dir_forward * wheel_start) - (dir_right * narrow_side) # 8. 左側準備變寬的內角
             
-            # 3. 組合合成多邊形陣列
             custom_mask_pts = np.array([pt1, pt2, pt3, pt4, pt5, pt6, pt7, pt8], dtype=np.int32)
             cv2.fillPoly(ink_thresh, [custom_mask_pts], 0)
         # ---------------------------------------------
