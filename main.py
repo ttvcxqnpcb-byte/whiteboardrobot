@@ -254,6 +254,68 @@ class VisionDebugMode(BaseMode):
         # 除錯模式下不需要 s, p, z 的反應，保留給未來特殊除錯按鍵擴充
         pass
 
+clicked_points = []
+
+def mouse_callback(event, x, y, flags, param):
+    global clicked_points
+    if event == cv2.EVENT_LBUTTONDOWN:
+        if len(clicked_points) < 4:
+            clicked_points.append([x, y])
+            print(f"📍 已選擇頂點 {len(clicked_points)}: ({x}, {y})")
+
+def setup_roi_manually(cap):
+    global clicked_points
+    clicked_points = []
+    
+    cv2.namedWindow("Select ROI (Whiteboard Area)")
+    cv2.setMouseCallback("Select ROI (Whiteboard Area)", mouse_callback)
+    
+    print("\n" + "=" * 40)
+    print("👆 [系統初始化] 請設定白板邊界")
+    print("請在彈出的視窗中，依序點擊 4 個點來框出白板範圍。")
+    print("建議順序：左上 -> 右上 -> 右下 -> 左下")
+    print("點完後按 'Enter' 或 '空白鍵' 確認。按 'r' 可以重新點擊。")
+    print("=" * 40 + "\n")
+
+    while True:
+        # 【修改】每次迴圈都重新讀取最新畫面，變成實時影像
+        ret, frame = cap.read()
+        if not ret:
+            print("❌ 無法讀取攝影機畫面，請檢查設備！")
+            break
+            
+        frame = cv2.flip(frame, 1)  # 保持翻轉，跟你平常看鏡子的直覺一樣
+        display_frame = frame.copy()
+        
+        # 繪製已點擊的點與連線
+        for i, pt in enumerate(clicked_points):
+            cv2.circle(display_frame, tuple(pt), 5, (0, 0, 255), -1)
+            cv2.putText(display_frame, str(i+1), (pt[0]+10, pt[1]-10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if i > 0:
+                cv2.line(display_frame, tuple(clicked_points[i-1]), tuple(clicked_points[i]), (0, 255, 0), 2)
+        
+        # 點滿四個點時，自動封閉多邊形並提示確認
+        if len(clicked_points) == 4:
+            cv2.line(display_frame, tuple(clicked_points[3]), tuple(clicked_points[0]), (0, 255, 0), 2)
+            cv2.putText(display_frame, "Press ENTER to confirm", (15, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+        cv2.imshow("Select ROI (Whiteboard Area)", display_frame)
+        
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('r'):
+            clicked_points = []
+            print("🔄 重新選擇")
+        elif key == 13 or key == 32:  # 13 是 Enter, 32 是 Space
+            if len(clicked_points) == 4:
+                print("✅ 邊界設定完成！")
+                break
+            else:
+                print(f"⚠️ 還沒點完 4 個點喔！目前只點了 {len(clicked_points)} 個。")
+
+    cv2.destroyWindow("Select ROI (Whiteboard Area)")
+    return clicked_points
 
 # ==========================================
 #  4. 主程式控制中樞 (Main Context)
@@ -263,12 +325,16 @@ def main():
     print("🚗 智慧自動擦拭機器人 - 多核心架構系統")
     print("=" * 40)
 
-    # 初始化公用硬體與演算法物件
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    roi_polygon = [[60, 50], [580, 50], [580, 430], [60, 430]]
+    roi_polygon = setup_roi_manually(cap)
+    
+    if not roi_polygon or len(roi_polygon) != 4:
+        print("❌ 未正確設定白板邊界，系統安全退出。")
+        cap.release()
+        return
 
     # 封裝全域共享上下文 (Context)
     shared_context = {
@@ -277,7 +343,7 @@ def main():
         'robot': Robot(),
         'whiteboard': Whiteboard(),
         'planner': CleaningPlanner(),
-        'visualizer': Visualizer(roi_polygon),
+        'visualizer': Visualizer(roi_polygon),  # 這裡會自動代入動態邊界
         'roi_polygon': roi_polygon
     }
 

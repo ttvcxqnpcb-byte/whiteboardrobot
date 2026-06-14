@@ -4,15 +4,13 @@ import numpy as np
 
 class Visualizer:
     def __init__(self, roi_polygon):
-        self.roi_polygon = roi_polygon
-        self.roi_x1, self.roi_y1 = roi_polygon[0]
-        self.roi_x2, self.roi_y2 = roi_polygon[2]
+        self.roi_pts = np.array([roi_polygon], dtype=np.int32)
 
     def draw_hud(self, frame, robot, whiteboard, planner, aruco_corners, dirty_rects, robot_mask_pts=None):        
         overlay = frame.copy()
-        cv2.rectangle(overlay, (self.roi_x1, self.roi_y1), (self.roi_x2, self.roi_y2), (0, 255, 0), -1)
+        cv2.fillPoly(overlay, self.roi_pts, (0, 255, 0))
         cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
-        cv2.rectangle(frame, (self.roi_x1, self.roi_y1), (self.roi_x2, self.roi_y2), (0, 255, 0), 2)
+        cv2.polylines(frame, self.roi_pts, isClosed=True, color=(0, 255, 0), thickness=2)
 
         for x, y, w, h, tx, ty in dirty_rects:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
