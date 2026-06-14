@@ -25,7 +25,7 @@ class FeatureExtractor:
             return center, c 
         return None, None
 
-    def extract_dirty_rects(self, ink_clean_mask, min_area=40):
+    def extract_dirty_rects(self, ink_clean_mask, min_area=20):
         contours, _ = cv2.findContours(ink_clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         dirty_rects = []
