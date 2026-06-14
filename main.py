@@ -132,20 +132,21 @@ class FullControlMode(BaseMode):
                 target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
 
                 if target is not None:
-                    delta_angle, pixel_dist = self.ctx['planner'].get_relative_movement(
-                        self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
-                    )
-                    target_abs_angle = (self.ctx['robot'].angle + delta_angle) % 360
+                    delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
+                    self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
+                )
 
-                    if pixel_dist < 30:
-                        new_cmd = "S"
-                        self.ctx['planner'].mark_as_visited(target[0], target[1])
-                        self.ctx['planner'].current_target = None
-                    elif abs(delta_angle) > 15:
-                        direction = "R" if delta_angle > 0 else "L"
-                        new_cmd = f"{direction}{target_abs_angle:.1f}"
-                    else:
-                        new_cmd = "F"
+                if pixel_dist < 30:
+                    new_cmd = "S"
+                    self.ctx['planner'].mark_as_visited(target[0], target[1])
+                    self.ctx['planner'].current_target = None
+                elif abs(delta_angle) > 15:
+                    direction = "R" if delta_angle > 0 else "L"
+                    
+                    new_cmd = f"{direction}{target_abs_angle:.1f}"
+                    # ──────────────────────────────────
+                else:
+                    new_cmd = "F"
 
                     # 藍牙發送與節流控制
                     current_time = time.time()
@@ -367,7 +368,7 @@ def main():
     while True:
         ret, frame = cap.read()
         if not ret: break
-        frame = cv2.flip(frame, 1)
+        #frame = cv2.flip(frame, 1)
 
         # 執行當前模式的每幀處理邏輯
         current_mode.process_frame(frame)

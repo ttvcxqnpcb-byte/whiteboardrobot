@@ -11,23 +11,28 @@ class Robot:
         self.target_y = None
 
     def update_state(self, center, corners):
-        
         if center is None or corners is None:
             return
             
         self.x = center[0]
         self.y = center[1]
         
-        pt_top_left = corners[0]
-        pt_top_right = corners[1]
+        front_x = (corners[0][0] + corners[1][0]) / 2.0
+        front_y = (corners[0][1] + corners[1][1]) / 2.0
+        back_x = (corners[2][0] + corners[3][0]) / 2.0
+        back_y = (corners[2][1] + corners[3][1]) / 2.0
         
-        dx = pt_top_right[0] - pt_top_left[0]
-        dy = pt_top_right[1] - pt_top_left[1]  
+        dx = front_x - back_x
+        dy = front_y - back_y  
         
-        angle_rad = np.arctan2(dy, dx)
-        angle_deg = np.degrees(angle_rad)
+        angle_cv = np.degrees(np.arctan2(dy, dx))
         
-        self.angle = angle_deg if angle_deg >= 0 else (angle_deg + 360)
+        abs_angle = angle_cv + 90
+        
+        if abs_angle > 180:
+            abs_angle -= 360
+            
+        self.angle = abs_angle
 
     def update_target(self, target_x, target_y):
         self.has_target = True

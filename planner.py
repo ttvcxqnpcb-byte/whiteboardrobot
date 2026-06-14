@@ -58,17 +58,16 @@ class CleaningPlanner:
         dx = target_x - robot_x
         dy = target_y - robot_y
         
-        target_angle_rad = math.atan2(dy, dx)
-        target_angle_deg = math.degrees(target_angle_rad)
+        target_angle_cv = math.degrees(math.atan2(dy, dx))
         
-        if target_angle_deg < 0:
-            target_angle_deg += 360
-
-        delta_angle = target_angle_deg - robot_angle
-
+        target_abs_angle = target_angle_cv + 90
+        if target_abs_angle > 180:
+            target_abs_angle -= 360
+            
+        delta_angle = target_abs_angle - robot_angle
         if delta_angle > 180:
             delta_angle -= 360
         elif delta_angle < -180:
             delta_angle += 360
 
-        return delta_angle, pixel_dist
+        return delta_angle, pixel_dist, target_abs_angle
