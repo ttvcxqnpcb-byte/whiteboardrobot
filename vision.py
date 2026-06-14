@@ -47,13 +47,13 @@ class VisionManager:
             dir_right = vec_right / (marker_width + 1e-5) 
             
             # 你可以在這裡慢慢微調這三個參數
-            motor_fwd   = marker_length * 1.60   # 最前端
+            motor_fwd   = marker_length * 1.05   # 最前端
             wheel_start = marker_length * -0.10    # 階梯轉折點
             body_bwd    = marker_length * 1.15   # 最底端
             
             # --- 左右寬度 (X軸) ---
             narrow_side = marker_width * 0.75     # 前半部窄區寬度
-            wheel_side  = marker_width * 1.2    # 後半部寬區寬度
+            wheel_side  = marker_width * 1.0    # 後半部寬區寬度
             
             # 2. 依序推算 8 個頂點 (從左前頂端開始，順時針繞一圈)
             pt1 = center + (dir_forward * motor_fwd)   - (dir_right * narrow_side) # 1. 左前頂點

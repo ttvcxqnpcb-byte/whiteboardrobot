@@ -28,7 +28,9 @@ class Visualizer:
 
         if aruco_corners is not None:
             cv2.polylines(frame, [np.array(aruco_corners, dtype=np.int32)], isClosed=True, color=(0, 0, 255), thickness=2)
+            cv2.circle(frame, (robot.aruco_x, robot.aruco_y), 4, (255, 0, 0), -1)
             cv2.circle(frame, (robot.x, robot.y), 4, (0, 255, 255), -1)
+            cv2.line(frame, (robot.aruco_x, robot.aruco_y), (robot.x, robot.y), (255, 255, 255), 1)
         
         if robot_mask_pts is not None:
             cv2.polylines(frame, [robot_mask_pts], isClosed=True, color=(255, 0, 255), thickness=2)

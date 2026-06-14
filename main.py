@@ -168,7 +168,7 @@ class FullControlMode(BaseMode):
                             self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
                         )
 
-                        if pixel_dist < 30:
+                        if pixel_dist < 5:
                             new_cmd = "S"
                             self.ctx['planner'].mark_as_visited(target[0], target[1])
                             self.ctx['planner'].current_target = None
