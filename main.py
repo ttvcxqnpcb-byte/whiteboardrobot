@@ -177,18 +177,21 @@ class FullControlMode(BaseMode):
                         elif self.last_cmd == "Y":
                             self.eraser_on = False
 
+                    # 1. 最高優先級：板擦狀態切換
                     if self.is_cleaning and target is not None and not self.eraser_on:
-                        new_cmd = "P"  # 有目標且板擦沒開 -> 優先發送開啟指令
+                        new_cmd = "P"  
                     elif (not self.is_cleaning or target is None) and self.eraser_on:
-                        new_cmd = "Y"  # 沒目標(或被暫停)且板擦開著 -> 優先發送關閉指令
+                        new_cmd = "Y"  
                     
+                    # 2. 板擦狀態正確時，才進行移動與轉向計算
                     else:
                         if target is not None:
                             delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
                                 self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
                             )
 
-                            if pixel_dist < 5:  # (請維持您目前設定的過渡數值)
+                            # (注意：這裡的 RES_SCALE 取決於您剛剛有沒有加全域變數，沒加的話就寫回 5)
+                            if pixel_dist < int(5 * RES_SCALE):  
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_as_visited(target[0], target[1])
                                 self.ctx['planner'].current_target = None
@@ -199,25 +202,6 @@ class FullControlMode(BaseMode):
                                 new_cmd = "F"
                         else:
                             new_cmd = "S"
-                
-                    if target is not None:
-                        # 有目標，計算路徑與絕對角度
-                        delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
-                            self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
-                        )
-
-                        if pixel_dist < int(5* RES_SCALE):
-                            new_cmd = "S"
-                            self.ctx['planner'].mark_as_visited(target[0], target[1])
-                            self.ctx['planner'].current_target = None
-                        elif abs(delta_angle) > 15:
-                            direction = "R" if delta_angle > 0 else "L"
-                            new_cmd = f"{direction}{target_abs_angle:.1f}"
-                        else:
-                            new_cmd = "F"
-                    else:
-                        # 🔥【新增】白板乾淨了，或是所有點都在黑名單內，強制原地停止！
-                        new_cmd = "S"
 
                     # 藍牙發送與節流控制（無目標時也同樣受到嚴格 ACK 保護）
                     current_time = time.time()
