@@ -128,6 +128,7 @@ class FullControlMode(BaseMode):
         self.is_cleaning = False
         self.last_cmd = None
         self.last_send_time = 0
+        self.eraser_on = False
 
         self.RETRY_COOLDOWN = 1.5
         self.MAX_RETRIES = 50         # 提高重試次數，確保死命塞到他回傳為止
@@ -170,6 +171,35 @@ class FullControlMode(BaseMode):
                 target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
 
                 if self.ctx.get('bt'):
+                    if self.ctx['is_cmd_acked']:
+                        if self.last_cmd == "P":
+                            self.eraser_on = True
+                        elif self.last_cmd == "Y":
+                            self.eraser_on = False
+
+                    if self.is_cleaning and target is not None and not self.eraser_on:
+                        new_cmd = "P"  # 有目標且板擦沒開 -> 優先發送開啟指令
+                    elif (not self.is_cleaning or target is None) and self.eraser_on:
+                        new_cmd = "Y"  # 沒目標(或被暫停)且板擦開著 -> 優先發送關閉指令
+                    
+                    else:
+                        if target is not None:
+                            delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
+                                self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
+                            )
+
+                            if pixel_dist < 5:  # (請維持您目前設定的過渡數值)
+                                new_cmd = "S"
+                                self.ctx['planner'].mark_as_visited(target[0], target[1])
+                                self.ctx['planner'].current_target = None
+                            elif abs(delta_angle) > 15:
+                                direction = "R" if delta_angle > 0 else "L"
+                                new_cmd = f"{direction}{target_abs_angle:.1f}"
+                            else:
+                                new_cmd = "F"
+                        else:
+                            new_cmd = "S"
+                
                     if target is not None:
                         # 有目標，計算路徑與絕對角度
                         delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
