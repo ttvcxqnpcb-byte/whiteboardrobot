@@ -47,16 +47,25 @@ class VisionManager:
             dir_right = vec_right / (marker_width + 1e-5) 
             
             # 你可以在這裡慢慢微調這三個參數
-            extend_fwd = marker_length * 2.2   
-            extend_bwd = marker_length * 1.0   
-            extend_side = marker_width * 1.6   
+            motor_fwd = marker_length * 1.3    # 黃色馬達往前凸出的距離
+            body_fwd  = marker_length * 0.7    # 木板前緣的距離
+            body_bwd  = marker_length * 0.9    # 木板/後輪往後延伸的距離
             
-            mask_FL = center + (dir_forward * extend_fwd) - (dir_right * extend_side)
-            mask_FR = center + (dir_forward * extend_fwd) + (dir_right * extend_side)
-            mask_BR = center - (dir_forward * extend_bwd) + (dir_right * extend_side)
-            mask_BL = center - (dir_forward * extend_bwd) - (dir_right * extend_side)
+            motor_side = marker_width * 0.45   # 黃色馬達的側邊寬度 (較窄)
+            wheel_side = marker_width * 1.15   # 黑色輪子的側邊寬度 (較寬)
             
-            custom_mask_pts = np.array([mask_FL, mask_FR, mask_BR, mask_BL], dtype=np.int32)
+            # 2. 依序推算 8 個頂點 (從左前馬達尖端開始，順時針繞一圈)
+            pt1 = center + (dir_forward * motor_fwd) - (dir_right * motor_side) # 左前馬達尖端
+            pt2 = center + (dir_forward * motor_fwd) + (dir_right * motor_side) # 右前馬達尖端
+            pt3 = center + (dir_forward * body_fwd)  + (dir_right * motor_side) # 右前馬達根部 (內縮)
+            pt4 = center + (dir_forward * body_fwd)  + (dir_right * wheel_side) # 右側木板前緣 (外擴)
+            pt5 = center - (dir_forward * body_bwd)  + (dir_right * wheel_side) # 右後黑輪底緣
+            pt6 = center - (dir_forward * body_bwd)  - (dir_right * wheel_side) # 左後黑輪底緣
+            pt7 = center + (dir_forward * body_fwd)  - (dir_right * wheel_side) # 左側木板前緣 (外擴)
+            pt8 = center + (dir_forward * body_fwd)  - (dir_right * motor_side) # 左前馬達根部 (內縮)
+            
+            # 3. 組合合成多邊形陣列
+            custom_mask_pts = np.array([pt1, pt2, pt3, pt4, pt5, pt6, pt7, pt8], dtype=np.int32)
             cv2.fillPoly(ink_thresh, [custom_mask_pts], 0)
         # ---------------------------------------------
             
