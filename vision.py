@@ -53,7 +53,7 @@ class VisionManager:
             
             # --- 左右寬度 (X軸) ---
             narrow_side = marker_width * 0.75     # 前半部窄區寬度
-            wheel_side  = marker_width * 1.0    # 後半部寬區寬度
+            wheel_side  = marker_width * 1.1    # 後半部寬區寬度
             
             # 2. 依序推算 8 個頂點 (從左前頂端開始，順時針繞一圈)
             pt1 = center + (dir_forward * motor_fwd)   - (dir_right * narrow_side) # 1. 左前頂點
