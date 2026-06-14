@@ -77,10 +77,18 @@ def bluetooth_worker(ctx):
                                         except Exception:
                                             continue
                                             
-                                    # 針對 Z 校準指令的特別放行條件 ('y' 或 '開始校準')
                                     elif expected_c == 'Z' and ('開始校準' in line or 'y' in line):
                                         ctx['is_cmd_acked'] = True
-                                        print(f"✅ [ACK 嚴格確認] 陀螺儀校準已觸發！")
+                                        print(f"✅ 陀螺儀校準已觸發！")
+                                        break
+                                    
+                                    elif expected_c == 'P' and 'ExtraMotor: ON' in line:
+                                        ctx['is_cmd_acked'] = True
+                                        print(f"✅ 板擦馬達已啟動！(P)")
+                                        break
+                                    elif expected_c == 'Y' and 'ExtraMotor: OFF' in line:
+                                        ctx['is_cmd_acked'] = True
+                                        print(f"✅ 板擦馬達已關閉！(Y)")
                                         break
                             # ==================================================
 
@@ -248,6 +256,18 @@ class FullControlMode(BaseMode):
                 self.ctx['pending_cmd'] = "Z"
                 self.ctx['is_cmd_acked'] = False
                 self.ctx['bt'].send_action("Z")
+        elif key == ord('e'):
+            print("\n📤 [Mode 0] 啟動板擦馬達: P")
+            if self.ctx.get('bt'): 
+                self.ctx['pending_cmd'] = "P"
+                self.ctx['is_cmd_acked'] = False
+                self.ctx['bt'].send_action("P")
+        elif key == ord('q'):
+            print("\n📤 [Mode 0] 關閉板擦馬達: Y")
+            if self.ctx.get('bt'): 
+                self.ctx['pending_cmd'] = "Y"
+                self.ctx['is_cmd_acked'] = False
+                self.ctx['bt'].send_action("Y")
 
 
 # ==========================================
@@ -371,6 +391,8 @@ class ManualControlMode(BaseMode):
         elif key in [ord('l'), ord('L')]: self._send_manual_cmd(f"L{self.target_angle:.1f}")
         elif key in [ord('r'), ord('R')]: self._send_manual_cmd(f"R{self.target_angle:.1f}")
         elif key in [ord('z'), ord('Z')]: self._send_manual_cmd("Z")
+        elif key in [ord('e'), ord('E')]: self._send_manual_cmd("P")
+        elif key in [ord('q'), ord('Q')]: self._send_manual_cmd("Y")
 
 
 # ==========================================
