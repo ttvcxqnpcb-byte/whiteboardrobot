@@ -21,7 +21,7 @@ except ImportError:
 
 BLUETOOTH_PORT = '/dev/tty.usbserial-140'  # 請確認您的 COM Port
 
-RES_SCALE = 1.0
+RES_SCALE = 1.5
 # ==========================================
 #  全域背景執行緒：自動連線、斷線重連與嚴格 ACK 驗證
 # ==========================================
