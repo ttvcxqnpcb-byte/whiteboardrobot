@@ -121,8 +121,8 @@ class FullControlMode(BaseMode):
         self.last_cmd = None
         self.last_send_time = 0
 
-        self.RETRY_COOLDOWN = 0.5
-        self.MAX_RETRIES = 5         # 提高重試次數，確保死命塞到他回傳為止
+        self.RETRY_COOLDOWN = 1.5
+        self.MAX_RETRIES = 50         # 提高重試次數，確保死命塞到他回傳為止
         self.retry_count = 0
 
         self.lost_frames_count = 0
@@ -161,27 +161,38 @@ class FullControlMode(BaseMode):
                 dirty_list = self.ctx['whiteboard'].get_dirty_list()
                 target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
 
-                if target is not None and self.ctx.get('bt'):
-                    delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
-                        self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
-                    )
+                if self.ctx.get('bt'):
+                    if target is not None:
+                        # 有目標，計算路徑與絕對角度
+                        delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
+                            self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
+                        )
 
-                    if pixel_dist < 30:
-                        new_cmd = "S"
-                        self.ctx['planner'].mark_as_visited(target[0], target[1])
-                        self.ctx['planner'].current_target = None
-                    elif abs(delta_angle) > 15:
-                        direction = "R" if delta_angle > 0 else "L"
-                        new_cmd = f"{direction}{target_abs_angle:.1f}"
+                        if pixel_dist < 30:
+                            new_cmd = "S"
+                            self.ctx['planner'].mark_as_visited(target[0], target[1])
+                            self.ctx['planner'].current_target = None
+                        elif abs(delta_angle) > 15:
+                            direction = "R" if delta_angle > 0 else "L"
+                            new_cmd = f"{direction}{target_abs_angle:.1f}"
+                        else:
+                            new_cmd = "F"
                     else:
-                        new_cmd = "F"
+                        # 🔥【新增】白板乾淨了，或是所有點都在黑名單內，強制原地停止！
+                        new_cmd = "S"
 
+                    # 藍牙發送與節流控制（無目標時也同樣受到嚴格 ACK 保護）
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
                     last_base_cmd = self.last_cmd[0] if self.last_cmd else None
                     
                     if new_base_cmd != last_base_cmd:
-                        print(f"📤 切換動作: {new_cmd} (距離: {pixel_dist:.1f}, 目標絕對角: {target_abs_angle:.1f})")
+                        # 如果動作改變 (例如從 F 變成 S)
+                        if target is not None:
+                            print(f"📤 切換動作: {new_cmd} (距離: {pixel_dist:.1f}, 目標絕對角: {target_abs_angle:.1f})")
+                        else:
+                            print(f"🎉 擦拭完畢 (無殘留字跡)！發送停止指令: {new_cmd}")
+                            
                         self.ctx['pending_cmd'] = new_cmd   # 註冊待確認指令
                         self.ctx['is_cmd_acked'] = False    # 剝奪確認狀態
                         self.ctx['bt'].send_action(new_cmd)
@@ -194,7 +205,7 @@ class FullControlMode(BaseMode):
                                 if self.retry_count < self.MAX_RETRIES:
                                     self.retry_count += 1
                                     print(f"⚠️ 未收到正確格式確認，強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
-                                    self.ctx['pending_cmd'] = new_cmd # 確保追蹤的是最新的指令
+                                    self.ctx['pending_cmd'] = new_cmd 
                                     self.ctx['bt'].send_action(new_cmd)
                                     self.last_cmd = new_cmd
                                     self.last_send_time = current_time

@@ -16,10 +16,17 @@ class CleaningPlanner:
         print(f"[Planner] Blacklist added: ({x}, {y})")
 
     def plan_next_target(self, dirty_list, robot_x, robot_y):
+        # 🔥【核心解方：記憶鎖定】🔥
+        # 如果已經有死命鎖定的目標，直接無視目前的視覺 (dirty_list)，憑記憶回傳！
+        if self.current_target is not None:
+            return self.current_target
+
+        # 如果沒有鎖定目標，才張開眼睛看視覺給的 dirty_list 來重新規劃
         if not dirty_list or robot_x is None or robot_y is None:
             self.current_target = None
             return None
 
+        # ── 以下為原本的尋找最近目標邏輯 ──
         valid_targets = []
         for dirty in dirty_list:
             cx, cy = dirty['cx'], dirty['cy']
@@ -43,6 +50,7 @@ class CleaningPlanner:
 
         for target in valid_targets:
             cx, cy = target['cx'], target['cy']
+            # 注意：這裡傳進來的 robot_x, robot_y 已經是 main.py 算好的「板擦座標」
             dist = self._calculate_distance(robot_x, robot_y, cx, cy)
             
             if dist < min_distance:
