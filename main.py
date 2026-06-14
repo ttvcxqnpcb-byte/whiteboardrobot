@@ -240,19 +240,18 @@ class ManualControlMode(BaseMode):
         super().__init__(shared_context)
         self.target_angle = 0.0  # 測試用的自訂絕對角度變數
 
-        # 【安全整合】將防暴走與重傳機制移植至此
+        # 【安全整合】保留藍牙重傳機制，已移除失明防暴走的相關計數器
         self.last_cmd = None
         self.last_send_time = 0
         self.RETRY_COOLDOWN = 0.5
-        self.MAX_RETRIES = 3         
+        self.MAX_RETRIES = 3
         self.retry_count = 0
-        self.lost_frames_count = 0
-        self.MAX_LOST_FRAMES = 5
 
     def activate(self):
-        print("\n🕹️ [Mode 2] 已切換至測試遙控模式！(藍牙自動連線已啟動)")
+        print("\n🕹️ [Mode 2] 已切換至測試遙控模式！(無須標籤也可遙控)")
         print("操作說明 (請點擊影像視窗後按鍵):")
-        print("  [W] 車子直走 (F)            | [S] 或 [空白鍵] 車子停止 (S)")
+        print("  [W] 車子直走 (F)            | [X] 車子後退 (B)")
+        print("  [S] 或 [空白鍵] 車子停止 (S)")
         print("  [I] 增加目標角度 (+5°)      | [K] 減少目標角度 (-5°)")
         print("  [L] 左轉捷徑至設定絕對角度  | [R] 右轉捷徑至設定絕對角度")
         print("  [Z] 陀螺儀校準 (Z)")
@@ -262,29 +261,13 @@ class ManualControlMode(BaseMode):
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-        ink_mask, robot_mask_pts = self.ctx['vision'].get_ink_clean_mask(frame, exclude_polygon=robot_corners, roi_polygon=self.ctx['roi_polygon'])
+        ink_mask, robot_mask_pts = self.ctx['vision'].get_ink_clean_mask(frame, exclude_polygon=robot_corners,
+                                                                         roi_polygon=self.ctx['roi_polygon'])
         dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
 
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
-
-        # 【安全整合】失明防暴走機制
-        if robot_center is None:
-            self.lost_frames_count += 1
-            if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                # 只有在車子非停止狀態下才觸發急停
-                if self.last_cmd and self.last_cmd[0] not in ["S", "Z"]:
-                    print("⚠️ [Mode 2] 警告：遙控時丟失標籤！啟動緊急停止！")
-                    if self.ctx.get('bt'): 
-                        self.ctx['bt'].send_action("S")
-                        self.last_cmd = "S"
-                        self.last_send_time = time.time()
-                        self.ctx['is_cmd_acked'] = False
-                        self.retry_count = 0
-                self.lost_frames_count = self.MAX_LOST_FRAMES 
-        else:
-            self.lost_frames_count = 0
 
         # 【安全整合】藍牙指令重傳機制
         if self.last_cmd is not None and not self.ctx.get('is_cmd_acked', True):
@@ -299,15 +282,18 @@ class ManualControlMode(BaseMode):
                     print(f"❌ [Mode 2] 放棄重試遙控指令: {self.last_cmd}")
                     self.ctx['is_cmd_acked'] = True
 
-        hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
-        
+        hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'],
+                                                    self.ctx['planner'], robot_corners, dirty_rects,
+                                                    robot_mask_pts=robot_mask_pts)
+
         bt_status = "Connected" if self.ctx.get('bt') else "DISCONNECTED (Reconnecting...)"
         bt_color = (0, 255, 0) if self.ctx.get('bt') else (0, 0, 255)
-        cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
-        
+        cv2.putText(hud_frame, f"MODE 2: TEST RC (No Tag Req.) | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, bt_color, 2)
+
         angle_text = f"Target Abs Angle: {self.target_angle:.1f} deg (Press I/K to adjust)"
         cv2.putText(hud_frame, angle_text, (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        
+
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def _send_manual_cmd(self, cmd):
@@ -318,7 +304,7 @@ class ManualControlMode(BaseMode):
             return
         print(f"🕹️ 遙控發送: {cmd}")
         bt.send_action(cmd)
-        
+
         self.last_cmd = cmd
         self.last_send_time = time.time()
         self.ctx['is_cmd_acked'] = False
@@ -336,18 +322,16 @@ class ManualControlMode(BaseMode):
 
         elif key in [ord('w'), ord('W')]:
             self._send_manual_cmd("F")
-        elif key in [ord('s'), ord('S'), 32]: 
+        elif key in [ord('x'), ord('X')]:  # 🌟 新增：按下 X 鍵後退
+            self._send_manual_cmd("B")
+        elif key in [ord('s'), ord('S'), 32]:
             self._send_manual_cmd("S")
         elif key in [ord('l'), ord('L')]:
-            # 【協議整合點】L 代表走捷徑，後面附上目標絕對角度
             self._send_manual_cmd(f"L{self.target_angle:.1f}")
         elif key in [ord('r'), ord('R')]:
-            # 【協議整合點】R 代表走捷徑，後面附上目標絕對角度
             self._send_manual_cmd(f"R{self.target_angle:.1f}")
         elif key in [ord('z'), ord('Z')]:
             self._send_manual_cmd("Z")
-
-
 # ==========================================
 #  邊界手動點擊函式
 # ==========================================
