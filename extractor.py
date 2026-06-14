@@ -3,12 +3,10 @@ import cv2.aruco as aruco
 import numpy as np
 
 class FeatureExtractor:
-    def __init__(self):
-        # 收容從 vision 移居過來的 ArUco 字典設定
+    def __init__(self, res_scale=1.0):
+        self.res_scale = res_scale
         self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
         self.parameters = aruco.DetectorParameters()
-        
-        # 【新增這行】為新版 OpenCV 建立專屬的 ArucoDetector 偵測器物件
         self.detector = aruco.ArucoDetector(self.aruco_dict, self.parameters)
 
     def extract_robot_pose(self, aruco_mask):
@@ -26,6 +24,9 @@ class FeatureExtractor:
         return None, None
 
     def extract_dirty_rects(self, ink_clean_mask, min_area=20):
+        if min_area is None:
+            min_area = int(20 * (self.res_scale ** 2))
+
         contours, _ = cv2.findContours(ink_clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         dirty_rects = []

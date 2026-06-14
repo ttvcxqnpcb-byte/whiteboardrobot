@@ -2,8 +2,15 @@ import cv2
 import numpy as np
 
 class VisionManager:
-    def __init__(self):
-        pass
+    def __init__(self, res_scale = 1.0):
+        blur = int(5 * res_scale)
+        self.blur_ksize = blur if blur % 2 != 0 else blur + 1
+        if self.blur_ksize < 3: self.blur_ksize = 3
+        
+        # 確保 adaptiveThreshold blockSize 放大後仍是大於等於 3 的奇數
+        block = int(11 * res_scale)
+        self.block_size = block if block % 2 != 0 else block + 1
+        if self.block_size < 3: self.block_size = 3
 
     def get_aruco_ready_mask(self, frame, roi_polygon=None):
         # (保持原樣不變)
@@ -20,7 +27,7 @@ class VisionManager:
         exclude_polygon: 傳入 ArUco 標籤的四個角點 (通常順序是 左上, 右上, 右下, 左下)
         """
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        blurred = cv2.GaussianBlur(gray, (self.blur_ksize, self.blur_ksize), 0)
         
         if roi_polygon is not None:
             roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
@@ -28,7 +35,7 @@ class VisionManager:
             
         ink_thresh = cv2.adaptiveThreshold(
             blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 7
+            cv2.THRESH_BINARY_INV, self.block_size, 7
         )
         
         # --- [優化區塊] 非等比例方向性遮罩 ---

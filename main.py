@@ -21,7 +21,7 @@ except ImportError:
 
 BLUETOOTH_PORT = '/dev/tty.usbserial-140'  # 請確認您的 COM Port
 
-
+RES_SCALE = 1.0
 # ==========================================
 #  全域背景執行緒：自動連線、斷線重連與嚴格 ACK 驗證
 # ==========================================
@@ -168,7 +168,7 @@ class FullControlMode(BaseMode):
                             self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
                         )
 
-                        if pixel_dist < 5:
+                        if pixel_dist < int(5* RES_SCALE):
                             new_cmd = "S"
                             self.ctx['planner'].mark_as_visited(target[0], target[1])
                             self.ctx['planner'].current_target = None
@@ -416,25 +416,29 @@ def main():
     print("=" * 40)
 
     cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(640 * RES_SCALE))
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(480 * RES_SCALE))
 
     roi_polygon = setup_roi_manually(cap)
     if not roi_polygon or len(roi_polygon) != 4:
         cap.release()
         return
 
+    # 【修改】將 RES_SCALE 傳入各個模組中
     shared_context = {
-        'vision': VisionManager(),
-        'extractor': FeatureExtractor(),
+        'vision': VisionManager(RES_SCALE),
+        'extractor': FeatureExtractor(RES_SCALE),
         'robot': Robot(),
-        'whiteboard': Whiteboard(),
-        'planner': CleaningPlanner(),
+        # Whiteboard 也需要縮放長寬與網格大小
+        'whiteboard': Whiteboard(width=int(640 * RES_SCALE), 
+                                 height=int(480 * RES_SCALE), 
+                                 cell_size=int(20 * RES_SCALE)),
+        'planner': CleaningPlanner(RES_SCALE),
         'visualizer': Visualizer(roi_polygon),  
         'roi_polygon': roi_polygon,
         'bt': None,                 
         'is_cmd_acked': True,       
-        'pending_cmd': None,        # 🔥 新增：紀錄目前正在等待確認的精確指令
+        'pending_cmd': None,        
         'bt_should_connect': False  
     }
 

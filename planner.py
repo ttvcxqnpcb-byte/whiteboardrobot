@@ -2,11 +2,10 @@
 import math
 
 class CleaningPlanner:
-    def __init__(self):
+    def __init__(self, res_scale=1.0):
         self.current_target = None 
-        
         self.blacklist = []           
-        self.blacklist_radius = 30    
+        self.blacklist_radius = int(30 * res_scale)   
 
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
