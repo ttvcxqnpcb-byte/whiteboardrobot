@@ -61,6 +61,8 @@ class FullControlMode(BaseMode):
         self.last_send_time = 0
         self.is_cmd_acked = True
         self.RETRY_COOLDOWN = 0.5
+        self.MAX_RETRIES = 3         
+        self.retry_count = 0
 
     def _background_listener(self):
         """持續接收車子 Arduino 傳回來的訊息"""
@@ -103,7 +105,7 @@ class FullControlMode(BaseMode):
 
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
-        self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
+            self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
         # 自動導航擦拭邏輯
         if self.is_cleaning:
@@ -128,17 +130,45 @@ class FullControlMode(BaseMode):
 
                 # 藍牙發送與節流控制
                 current_time = time.time()
-                if new_cmd != self.last_cmd:
-                    print(f"📤 發送新指令: {new_cmd} (距離: {pixel_dist:.1f}, 誤差角: {delta_angle:.1f})")
+                
+                # 提取主指令 (F, S, L, R)
+                new_base_cmd = new_cmd[0]
+                last_base_cmd = self.last_cmd[0] if self.last_cmd else None
+                
+                if new_base_cmd != last_base_cmd:
+                    # 【情境 1：動作切換】例如從前進(F)變成停止(S)，無視冷卻，立刻發送！
+                    print(f"📤 切換動作: {new_cmd} (距離: {pixel_dist:.1f}, 誤差角: {delta_angle:.1f})")
                     if self.bt: self.bt.send_action(new_cmd)
                     self.last_cmd = new_cmd
                     self.last_send_time = current_time
                     self.is_cmd_acked = False
-                elif not self.is_cmd_acked:
+                    self.retry_count = 0
+                    
+                else:
+                    # 【情境 2：動作相同】例如都在轉彎 (R90.1 變 R90.5)，必須被 Cooldown 限制！
                     if current_time - self.last_send_time > self.RETRY_COOLDOWN:
-                        print(f"⚠️ 尚未收到確認，重發指令: {new_cmd}")
-                        if self.bt: self.bt.send_action(new_cmd)
-                        self.last_send_time = current_time
+                        
+                        if not self.is_cmd_acked:
+                            # 沒收到確認：重傳機制
+                            if self.retry_count < self.MAX_RETRIES:
+                                self.retry_count += 1
+                                print(f"⚠️ 未收到確認，重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
+                                if self.bt: self.bt.send_action(new_cmd)
+                                self.last_cmd = new_cmd
+                                self.last_send_time = current_time
+                            else:
+                                print(f"❌ 放棄重試指令: {self.last_cmd}，強制放行。")
+                                self.is_cmd_acked = True
+                        
+                        else:
+                            # 已收到確認，但數字有微調 (攝影機雜訊或目標更新)：每隔一段時間才允許更新
+                            if new_cmd != self.last_cmd:
+                                print(f"🔄 更新角度: {new_cmd}")
+                                if self.bt: self.bt.send_action(new_cmd)
+                                self.last_cmd = new_cmd
+                                self.last_send_time = current_time
+                                self.is_cmd_acked = False
+                                self.retry_count = 0
         else:
             self.ctx['planner'].current_target = None
 
