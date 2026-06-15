@@ -17,6 +17,7 @@ except ImportError:
 
 BLUETOOTH_PORT = '/dev/tty.usbserial-140'  # 請確認您的 COM Port
 RES_SCALE = 1.5
+CAMERA_ID = 0
 
 # ==========================================
 #  邊界手動點擊函式 (可於未來繼續拆分至 UI 模組)
@@ -59,7 +60,12 @@ def main():
     print("🚗 智慧自動擦拭機器人 - 極致輕量化架構版")
     print("=" * 40)
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(CAMERA_ID)
+
+    if not cap.isOpened():
+        print(f"❌ 無法開啟攝影機 ID: {CAMERA_ID}，請嘗試更改 CAMERA_ID 變數 (例如改為 1 或 2)")
+        return
+    
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(640 * RES_SCALE))
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(480 * RES_SCALE))
 
