@@ -13,9 +13,10 @@ class BTInterface:
         self.should_connect = False
         self.is_connected = False
         
-        # --- 嚴格 ACK 驗證狀態 ---
+        # --- ACK 驗證 ---
         self.is_cmd_acked = True
         self.pending_cmd = None
+        self.is_action_finished = False
         
         # 初始化時自動啟動背景監聽與連線執行緒
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -63,6 +64,11 @@ class BTInterface:
                             if msg_str:
                                 print(f"\n🟢 [智慧車回傳]: {msg_str}")
                                 self._verify_ack(msg_str)
+
+                                if "finish" in msg_str.lower():
+                                    print("✅ [狀態] 收到 finish")
+                                    self.is_action_finished = True
+
                     except Exception as e:
                         print(f"\n❌ [藍牙背景] 連線異常中斷 ({e})，準備重新連線...")
                         self.is_connected = False

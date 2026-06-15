@@ -97,6 +97,10 @@ class FullControlMode(BaseMode):
                     if self.ctx['bt'].is_cmd_acked:
                         if self.last_cmd == "P": self.eraser_on = True
                         elif self.last_cmd == "Y": self.eraser_on = False
+
+                    if getattr(self.ctx['bt'], 'is_action_finished', False):
+                        self.last_cmd = None  # 騙過程式，讓它認為是全新的指令
+                        self.ctx['bt'].is_action_finished = False
                     
                     pixel_dist = 0.0
                     target_abs_angle = 0.0
