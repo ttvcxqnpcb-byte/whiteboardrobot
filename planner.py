@@ -15,8 +15,6 @@ class CleaningPlanner:
         print(f"[Planner] Blacklist added: ({x}, {y})")
 
     def plan_next_target(self, dirty_list, robot_x, robot_y):
-        # 🔥【核心解方：記憶鎖定】🔥
-        # 如果已經有死命鎖定的目標，直接無視目前的視覺 (dirty_list)，憑記憶回傳！
         if self.current_target is not None:
             return self.current_target
 

@@ -204,7 +204,7 @@ class FullControlMode(BaseMode):
                                 self.ctx['planner'].current_target = None
                             elif abs(delta_angle) > 15:
                                 direction = "R" if delta_angle > 0 else "L"
-                                new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                new_cmd = f"{direction}{abs(delta_angle):.1f}"
                             else:
                                 new_cmd = "F"
                         else:
@@ -436,11 +436,11 @@ class ManualControlMode(BaseMode):
         if key in [ord('i'), ord('I')]:
             self.target_angle = (self.target_angle + 5.0) % 360
             if self.target_angle > 180.0: self.target_angle -= 360.0
-            print(f"🔄 絕對角度設定為: {self.target_angle:.1f}°")
+            print(f" 相對角度移動為: {self.target_angle:.1f}°")
         elif key in [ord('k'), ord('K')]:
             self.target_angle -= 5.0
             if self.target_angle < -180.0: self.target_angle += 360.0
-            print(f"🔄 絕對角度設定為: {self.target_angle:.1f}°")
+            print(f" 相對角度移動為: {self.target_angle:.1f}°")
         
         # 動作控制
         elif key in [ord('w'), ord('W')]: self._send_manual_cmd("F")
