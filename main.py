@@ -16,9 +16,6 @@ except ImportError:
     print("⚠️ 找不到 bluetooth.py，藍牙控制將無法正常運作。")
     BT_AVAILABLE = False
 
-BLUETOOTH_PORT = '/dev/tty.usbserial-140'  # 請確認您的 COM Port
-RES_SCALE = 1.5
-CAMERA_ID = 0
 
 # ==========================================
 #  邊界手動點擊函式 (可於未來繼續拆分至 UI 模組)
