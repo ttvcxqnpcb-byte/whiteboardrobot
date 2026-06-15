@@ -309,7 +309,6 @@ class VisionDebugMode(BaseMode):
 
     def handle_key(self, key): pass
 
-
 # ==========================================
 #  4. Mode 2: 測試遙控與精準角度模式
 # ==========================================
@@ -329,6 +328,13 @@ class ManualControlMode(BaseMode):
 
     def activate(self):
         print("\n🕹️ [Mode 2] 已切換至測試遙控模式！(藍牙自動連線已啟動)")
+        print("操作說明 (請點擊影像視窗後按鍵):")
+        print("  [W] 車子直走 (F)            | [X] 車子後退 (B)")
+        print("  [S] 或 [空白鍵] 車子停止 (S)")
+        print("  [I] 增加目標角度 (+5°)      | [K] 減少目標角度 (-5°)")
+        print("  [L] 左轉至設定絕對角度      | [R] 右轉至設定絕對角度")
+        print("  [Z] 陀螺儀校準 (Z)")
+        print("  [E] 啟動板擦馬達 (P)        | [Q] 關閉板擦馬達 (Y)")
         self.ctx['bt_should_connect'] = True
         self.ctx['planner'].current_target = None
 
@@ -342,14 +348,17 @@ class ManualControlMode(BaseMode):
             self.ctx['robot'].update_state(robot_center, robot_corners)
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
-        if self.ctx.get('bt') and self.ctx['is_cmd_acked']:
+        # 追蹤並更新板擦狀態 (對應 Arduino 回傳的 ACK)
+        if self.ctx.get('bt') and self.ctx.get('is_cmd_acked', True):
             if self.last_cmd == "P": self.eraser_on = True
             elif self.last_cmd == "Y": self.eraser_on = False
 
+        # 安全防暴走機制：連續丟失標籤強制發送 S
         if robot_center is None:
             self.lost_frames_count += 1
             if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                if self.last_cmd and self.last_cmd[0] not in ["S", "Z"]:
+                # 只要最後一個指令不是 S，失明時一律強制煞車
+                if self.last_cmd and self.last_cmd[0] != "S":
                     if self.ctx.get('bt'): 
                         print("⚠️ [Mode 2] 警告：遙控時丟失標籤！強硬煞車！")
                         self.ctx['pending_cmd'] = "S"
@@ -378,22 +387,28 @@ class ManualControlMode(BaseMode):
                     self.ctx['is_cmd_acked'] = True
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
+        
         bt_status = "Connected" if self.ctx.get('bt') else "DISCONNECTED"
         bt_color = (0, 255, 0) if self.ctx.get('bt') else (0, 0, 255)
         eraser_str = "ON" if self.eraser_on else "OFF"
-        cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status} | Eraser: {eraser_str}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
         
+        # HUD 顯示遙控資訊與板擦狀態
+        cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status} | Eraser: {eraser_str}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
         cv2.putText(hud_frame, f"Target Abs Angle: {self.target_angle:.1f} (I/K adjust)", (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def _send_manual_cmd(self, cmd):
         bt = self.ctx.get('bt')
-        if not bt: return
+        if not bt:
+            print("⏳ 藍牙未連線，指令暫時無效...")
+            return
         
         if cmd == self.last_cmd:
             return
 
         print(f"🕹️ 遙控發送: {cmd}")
+        # 將指令推入背景驗證池
         self.ctx['pending_cmd'] = cmd
         self.ctx['is_cmd_acked'] = False
         bt.send_action(cmd)
@@ -411,14 +426,18 @@ class ManualControlMode(BaseMode):
             self.target_angle -= 5.0
             if self.target_angle < -180.0: self.target_angle += 360.0
             print(f"🔄 絕對角度設定為: {self.target_angle:.1f}°")
+        
+        # 動作控制
         elif key in [ord('w'), ord('W')]: self._send_manual_cmd("F")
+        elif key in [ord('x'), ord('X')]: self._send_manual_cmd("B")  # 完美對接 Arduino 的 'B'
         elif key in [ord('s'), ord('S'), 32]: self._send_manual_cmd("S")
         elif key in [ord('l'), ord('L')]: self._send_manual_cmd(f"L{self.target_angle:.1f}")
         elif key in [ord('r'), ord('R')]: self._send_manual_cmd(f"R{self.target_angle:.1f}")
         elif key in [ord('z'), ord('Z')]: self._send_manual_cmd("Z")
+        
+        # 板擦馬達控制
         elif key in [ord('e'), ord('E')]: self._send_manual_cmd("P")
         elif key in [ord('q'), ord('Q')]: self._send_manual_cmd("Y")
-
 
 # ==========================================
 #  邊界手動點擊函式
