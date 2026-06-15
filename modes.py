@@ -158,6 +158,24 @@ class FullControlMode(BaseMode):
                         else:
                             new_cmd = "S"
 
+                    if target is not None:
+                        # 將 ROI 轉為 numpy array 以便計算
+                        roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
+                        # 計算車子中心與邊界的最短距離
+                        dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
+                        
+                        safe_margin = int(25 * current_scale) # 安全邊距 (約 35-40 像素)
+                        
+                        # 如果距離邊界太近 (大於 0 代表在內側，但小於安全距離)
+                        if 0 <= dist_to_edge < safe_margin:
+                            print(f"🛑 [電子圍籬觸發] 距離邊界僅 {dist_to_edge:.1f}px，緊急迴避！")
+                            # 如果本來想前進，強制改成後退
+                            if new_cmd == "F":
+                                new_cmd = "B"
+                            # 如果是其他的，強制煞車
+                            elif new_cmd != "B":
+                                new_cmd = "S"
+
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
                     last_base_cmd = self.last_cmd[0] if self.last_cmd else None
