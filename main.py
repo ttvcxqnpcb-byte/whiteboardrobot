@@ -7,6 +7,7 @@ from whiteboard import Whiteboard
 from planner import CleaningPlanner
 from display import Visualizer
 from modes import FullControlMode, VisionDebugMode, ManualControlMode
+from config.system_settings import CAMERA_ID, BLUETOOTH_PORT, RES_SCALE, GRID_CELL_SIZE
 
 try:
     from bluetooth import BTInterface
@@ -86,7 +87,7 @@ def main():
         'robot': Robot(),
         'whiteboard': Whiteboard(width=int(640 * RES_SCALE), 
                                  height=int(480 * RES_SCALE), 
-                                 cell_size=int(20 * RES_SCALE)),
+                                 cell_size=int(GRID_CELL_SIZE * RES_SCALE)),
         'planner': CleaningPlanner(RES_SCALE),
         'visualizer': Visualizer(roi_polygon),  
         'roi_polygon': roi_polygon,

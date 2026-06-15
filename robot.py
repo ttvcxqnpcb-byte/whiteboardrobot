@@ -1,4 +1,5 @@
 import numpy as np
+from config.robot_settings import *
 
 class Robot:
     def __init__(self):
@@ -19,7 +20,6 @@ class Robot:
         if center is None or corners is None:
             return
             
-        # 【新增】把 ArUco 的原始中心點存起來
         self.aruco_x = int(center[0])
         self.aruco_y = int(center[1])
         
@@ -45,7 +45,7 @@ class Robot:
         dir_x = dx / (marker_length + 1e-5)
         dir_y = dy / (marker_length + 1e-5)
         
-        eraser_offset = marker_length * 0.8  
+        eraser_offset = marker_length * ERASER_OFFSET_RATIO
         
         # 覆寫 robot 的主座標為板擦中心
         self.x = int(self.aruco_x + dir_x * eraser_offset)
@@ -63,12 +63,12 @@ class Robot:
         marker_width = np.linalg.norm(vec_right)
         dir_right_mask = vec_right / (marker_width + 1e-5) 
         
-        motor_fwd   = marker_length_mask * 1.05   
-        wheel_start = marker_length_mask * -0.10  
-        body_bwd    = marker_length_mask * 1.15   
+        motor_fwd   = marker_length_mask * MASK_MOTOR_FWD   
+        wheel_start = marker_length_mask * MASK_WHEEL_START  
+        body_bwd    = marker_length_mask * MASK_BODY_BWD   
         
-        narrow_side = marker_width * 0.75     
-        wheel_side  = marker_width * 1.0      
+        narrow_side = marker_width * MASK_NARROW_SIDE     
+        wheel_side  = marker_width * MASK_WHEEL_SIDE   
         
         pt1 = poly_center + (dir_forward_mask * motor_fwd)   - (dir_right_mask * narrow_side)
         pt2 = poly_center + (dir_forward_mask * motor_fwd)   + (dir_right_mask * narrow_side)
