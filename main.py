@@ -2,7 +2,6 @@
 import cv2
 import numpy as np
 import time
-import threading
 from abc import ABC, abstractmethod
 
 from vision import VisionManager
@@ -20,87 +19,7 @@ except ImportError:
     BT_AVAILABLE = False
 
 BLUETOOTH_PORT = '/dev/tty.usbserial-140'  # 請確認您的 COM Port
-
 RES_SCALE = 1.5
-# ==========================================
-#  全域背景執行緒：自動連線、斷線重連與嚴格 ACK 驗證
-# ==========================================
-def bluetooth_worker(ctx):
-    """背景執行緒：負責藍牙連線，並絕對嚴格驗證 Arduino 回傳的 ACK 格式"""
-    last_attempt_time = 0
-    while True:
-        if ctx.get('bt_should_connect') and BT_AVAILABLE:
-            if ctx.get('bt') is None:
-                if time.time() - last_attempt_time > 3.0:
-                    last_attempt_time = time.time()
-                    print(f"\n🔄 [藍牙背景] 嘗試連線至 {BLUETOOTH_PORT}...")
-                    try:
-                        bt_instance = BTInterface(port=BLUETOOTH_PORT)
-                        ctx['bt'] = bt_instance
-                        ctx['is_cmd_acked'] = True
-                        print("\n✅ [藍牙背景] 藍牙連線成功！")
-                    except Exception as e:
-                        pass
-            else:
-                try:
-                    msg = ctx['bt'].listen()
-                    if msg:
-                        msg_str = str(msg).strip()
-                        if msg_str:
-                            print(f"\n🟢 [智慧車回傳]: {msg_str}")
-                            
-                            # ==================================================
-                            # 🔥 絕對嚴格 ACK 驗證邏輯 🔥
-                            # ==================================================
-                            pending = ctx.get('pending_cmd')
-                            if pending and not ctx.get('is_cmd_acked'):
-                                expected_c = pending[0].upper()
-                                expected_ang = float(pending[1:]) if len(pending) > 1 else 0.0
-                                
-                                # 為了防範一次收到多行 (例如 Echo 跟 Cmd 黏在一起)，我們用換行符號切開找
-                                lines = msg_str.split('\n')
-                                for line in reversed(lines):
-                                    line = line.strip()
-                                    
-                                    # 嚴格比對 Arduino 的 "Cmd: X,Ang: Y.YY"
-                                    if "Cmd:" in line and ",Ang:" in line:
-                                        try:
-                                            parts = line.split(",")
-                                            ret_c = parts[0].split(":")[1].strip()
-                                            ret_ang = float(parts[1].split(":")[1].strip())
-                                            
-                                            # 驗證字元是否相符，且浮點數誤差小於 0.1
-                                            if ret_c == expected_c and abs(ret_ang - expected_ang) < 0.1:
-                                                ctx['is_cmd_acked'] = True
-                                                print(f"✅ [ACK 嚴格確認] 成功驗證指令: {pending}")
-                                                break # 驗證成功就跳出檢查
-                                        except Exception:
-                                            continue
-                                            
-                                    elif expected_c == 'Z' and ('開始校準' in line or 'y' in line):
-                                        ctx['is_cmd_acked'] = True
-                                        print(f"✅ 陀螺儀校準已觸發！")
-                                        break
-                                    
-                                    elif expected_c == 'P' and 'ExtraMotor: ON' in line:
-                                        ctx['is_cmd_acked'] = True
-                                        print(f"✅ 板擦馬達已啟動！(P)")
-                                        break
-                                    elif expected_c == 'Y' and 'ExtraMotor: OFF' in line:
-                                        ctx['is_cmd_acked'] = True
-                                        print(f"✅ 板擦馬達已關閉！(Y)")
-                                        break
-                            # ==================================================
-
-                except Exception as e:
-                    print(f"\n❌ [藍牙背景] 連線異常中斷 ({e})，準備重新連線...")
-                    ctx['bt'] = None
-        else:
-            if ctx.get('bt') is not None:
-                ctx['bt'] = None
-        
-        time.sleep(0.05)
-
 
 # ==========================================
 #  1. 模式基底類別 (Strategy Interface)
@@ -131,7 +50,7 @@ class FullControlMode(BaseMode):
         self.eraser_on = False
 
         self.RETRY_COOLDOWN = 1.5
-        self.MAX_RETRIES = 50         # 提高重試次數，確保死命塞到他回傳為止
+        self.MAX_RETRIES = 50         
         self.retry_count = 0
 
         self.lost_frames_count = 0
@@ -139,23 +58,21 @@ class FullControlMode(BaseMode):
 
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動控制模式 (藍牙自動連線已啟動)")
-        self.ctx['bt_should_connect'] = True  
+        if self.ctx.get('bt'):
+            self.ctx['bt'].enable_auto_connect()
 
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-
-        # 2. 先更新車體狀態，並取得最新的車體遮罩
+        
         robot_mask_pts = None
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
             robot_mask_pts = self.ctx['robot'].get_mask_polygon()
 
-        # 3. 將車體遮罩丟給視覺模組去找髒污
         ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
         dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
 
-        # 4. 更新白板髒污矩陣
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
         if self.is_cleaning:
@@ -164,9 +81,7 @@ class FullControlMode(BaseMode):
                 if self.lost_frames_count >= self.MAX_LOST_FRAMES:
                     if self.ctx.get('bt') and self.last_cmd != "S": 
                         print("⚠️ 警告：丟失車體標籤！啟動緊急停止並等待確認！")
-                        self.ctx['pending_cmd'] = "S"
-                        self.ctx['is_cmd_acked'] = False
-                        self.ctx['bt'].send_action("S")
+                        self.ctx['bt'].send_new_action("S")
                         self.last_cmd = "S"
                         self.last_send_time = time.time()
                         self.retry_count = 0
@@ -178,75 +93,63 @@ class FullControlMode(BaseMode):
                 target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
 
                 if self.ctx.get('bt'):
-                    if self.ctx['is_cmd_acked']:
+                    if self.ctx['bt'].is_cmd_acked:
                         if self.last_cmd == "P":
                             self.eraser_on = True
                         elif self.last_cmd == "Y":
                             self.eraser_on = False
 
-                    # 1. 最高優先級：板擦狀態切換
                     if self.is_cleaning and target is not None and not self.eraser_on:
                         new_cmd = "P"  
                     elif (not self.is_cleaning or target is None) and self.eraser_on:
                         new_cmd = "Y"  
-                    
-                    # 2. 板擦狀態正確時，才進行移動與轉向計算
                     else:
                         if target is not None:
                             delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
                                 self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
                             )
 
-                            # (注意：這裡的 RES_SCALE 取決於您剛剛有沒有加全域變數，沒加的話就寫回 5)
                             if pixel_dist < int(5 * RES_SCALE):  
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_as_visited(target[0], target[1])
                                 self.ctx['planner'].current_target = None
                             elif abs(delta_angle) > 15:
                                 direction = "R" if delta_angle > 0 else "L"
-                                new_cmd = f"{direction}{abs(delta_angle):.1f}"
+                                new_cmd = f"{direction}{target_abs_angle:.1f}"
                             else:
                                 new_cmd = "F"
                         else:
                             new_cmd = "S"
 
-                    # 藍牙發送與節流控制（無目標時也同樣受到嚴格 ACK 保護）
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
                     last_base_cmd = self.last_cmd[0] if self.last_cmd else None
                     
                     if new_base_cmd != last_base_cmd:
-                        # 如果動作改變 (例如從 F 變成 S)
                         if target is not None:
                             print(f"📤 切換動作: {new_cmd} (距離: {pixel_dist:.1f}, 目標絕對角: {target_abs_angle:.1f})")
                         else:
                             print(f"🎉 擦拭完畢 (無殘留字跡)！發送停止指令: {new_cmd}")
                             
-                        self.ctx['pending_cmd'] = new_cmd   # 註冊待確認指令
-                        self.ctx['is_cmd_acked'] = False    # 剝奪確認狀態
-                        self.ctx['bt'].send_action(new_cmd)
+                        self.ctx['bt'].send_new_action(new_cmd)
                         self.last_cmd = new_cmd
                         self.last_send_time = current_time
                         self.retry_count = 0
                     else:
                         if current_time - self.last_send_time > self.RETRY_COOLDOWN:
-                            if not self.ctx['is_cmd_acked']:
+                            if not self.ctx['bt'].is_cmd_acked:
                                 if self.retry_count < self.MAX_RETRIES:
                                     self.retry_count += 1
                                     print(f"⚠️ 未收到正確格式確認，強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
-                                    self.ctx['pending_cmd'] = new_cmd 
-                                    self.ctx['bt'].send_action(new_cmd)
-                                    self.last_cmd = new_cmd
+                                    self.ctx['bt'].resend_action()
                                     self.last_send_time = current_time
                                 else:
                                     print(f"❌ 放棄重試指令: {self.last_cmd}，強制放行防止系統死鎖。")
-                                    self.ctx['is_cmd_acked'] = True
+                                    self.ctx['bt'].is_cmd_acked = True
                             else:
                                 if new_cmd != self.last_cmd:
                                     print(f"🔄 更新角度: {new_cmd}")
-                                    self.ctx['pending_cmd'] = new_cmd 
-                                    self.ctx['is_cmd_acked'] = False
-                                    self.ctx['bt'].send_action(new_cmd)
+                                    self.ctx['bt'].send_new_action(new_cmd)
                                     self.last_cmd = new_cmd
                                     self.last_send_time = current_time
                                     self.retry_count = 0
@@ -254,9 +157,13 @@ class FullControlMode(BaseMode):
             self.ctx['planner'].current_target = None
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
-        bt_status = "Connected" if self.ctx.get('bt') else "DISCONNECTED"
-        bt_color = (0, 255, 0) if self.ctx.get('bt') else (0, 0, 255)
+        
+        # UI 連線狀態檢查更新
+        is_bt_connected = self.ctx.get('bt') and self.ctx['bt'].is_connected
+        bt_status = "Connected" if is_bt_connected else "DISCONNECTED"
+        bt_color = (0, 255, 0) if is_bt_connected else (0, 0, 255)
         state_str = "Running" if self.is_cleaning else "Standby"
+        
         cv2.putText(hud_frame, f"MODE 0: AUTO ({state_str}) | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
@@ -268,27 +175,19 @@ class FullControlMode(BaseMode):
             print("\n⏸️ [Mode 0] 暫停待機")
             self.is_cleaning = False
             if self.ctx.get('bt'): 
-                self.ctx['pending_cmd'] = "S"
-                self.ctx['is_cmd_acked'] = False
-                self.ctx['bt'].send_action("S")
+                self.ctx['bt'].send_new_action("S")
         elif key == ord('z'):
             print("\n📤 [Mode 0] 發送陀螺儀校準指令: Z")
             if self.ctx.get('bt'): 
-                self.ctx['pending_cmd'] = "Z"
-                self.ctx['is_cmd_acked'] = False
-                self.ctx['bt'].send_action("Z")
+                self.ctx['bt'].send_new_action("Z")
         elif key == ord('e'):
             print("\n📤 [Mode 0] 啟動板擦馬達: P")
             if self.ctx.get('bt'): 
-                self.ctx['pending_cmd'] = "P"
-                self.ctx['is_cmd_acked'] = False
-                self.ctx['bt'].send_action("P")
+                self.ctx['bt'].send_new_action("P")
         elif key == ord('q'):
             print("\n📤 [Mode 0] 關閉板擦馬達: Y")
             if self.ctx.get('bt'): 
-                self.ctx['pending_cmd'] = "Y"
-                self.ctx['is_cmd_acked'] = False
-                self.ctx['bt'].send_action("Y")
+                self.ctx['bt'].send_new_action("Y")
 
 
 # ==========================================
@@ -297,7 +196,8 @@ class FullControlMode(BaseMode):
 class VisionDebugMode(BaseMode):
     def activate(self):
         print("\n👁️ [Mode 1] 已切換至純視覺除錯模式 (自動關閉藍牙)")
-        self.ctx['bt_should_connect'] = False  
+        if self.ctx.get('bt'):
+            self.ctx['bt'].disable_auto_connect()
         self.ctx['planner'].current_target = None 
 
     def process_frame(self, frame):
@@ -339,20 +239,14 @@ class ManualControlMode(BaseMode):
 
     def activate(self):
         print("\n🕹️ [Mode 2] 已切換至測試遙控模式！(藍牙自動連線已啟動)")
-        print("操作說明 (請點擊影像視窗後按鍵):")
-        print("  [W] 車子直走 (F)            | [X] 車子後退 (B)")
-        print("  [S] 或 [空白鍵] 車子停止 (S)")
-        print("  [I] 增加目標角度 (+5°)      | [K] 減少目標角度 (-5°)")
-        print("  [L] 左轉至設定絕對角度      | [R] 右轉至設定絕對角度")
-        print("  [Z] 陀螺儀校準 (Z)")
-        print("  [E] 啟動板擦馬達 (P)        | [Q] 關閉板擦馬達 (Y)")
-        self.ctx['bt_should_connect'] = True
+        if self.ctx.get('bt'):
+            self.ctx['bt'].enable_auto_connect()
         self.ctx['planner'].current_target = None
 
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-
+        
         robot_mask_pts = None
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
@@ -363,22 +257,17 @@ class ManualControlMode(BaseMode):
 
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
-        # 追蹤並更新板擦狀態 (對應 Arduino 回傳的 ACK)
-        if self.ctx.get('bt') and self.ctx.get('is_cmd_acked', True):
+        if self.ctx.get('bt') and self.ctx['bt'].is_cmd_acked:
             if self.last_cmd == "P": self.eraser_on = True
             elif self.last_cmd == "Y": self.eraser_on = False
 
-        # 安全防暴走機制：連續丟失標籤強制發送 S
         if robot_center is None:
             self.lost_frames_count += 1
             if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                # 只要最後一個指令不是 S，失明時一律強制煞車
-                if self.last_cmd and self.last_cmd[0] != "S":
+                if self.last_cmd and self.last_cmd[0] not in ["S", "Z"]:
                     if self.ctx.get('bt'): 
                         print("⚠️ [Mode 2] 警告：遙控時丟失標籤！強硬煞車！")
-                        self.ctx['pending_cmd'] = "S"
-                        self.ctx['is_cmd_acked'] = False
-                        self.ctx['bt'].send_action("S")
+                        self.ctx['bt'].send_new_action("S")
                         self.last_cmd = "S"
                         self.last_send_time = time.time()
                         self.retry_count = 0
@@ -386,31 +275,28 @@ class ManualControlMode(BaseMode):
         else:
             self.lost_frames_count = 0
 
-        # 重傳死纏爛打機制
-        if self.last_cmd is not None and not self.ctx.get('is_cmd_acked', True):
+        # 重傳機制
+        if self.last_cmd is not None and self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked:
             current_time = time.time()
             if current_time - self.last_send_time > self.RETRY_COOLDOWN:
                 if self.retry_count < self.MAX_RETRIES:
                     self.retry_count += 1
                     print(f"⚠️ [Mode 2] 未收到嚴格確認，強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {self.last_cmd}")
-                    if self.ctx.get('bt'): 
-                        self.ctx['pending_cmd'] = self.last_cmd
-                        self.ctx['bt'].send_action(self.last_cmd)
+                    self.ctx['bt'].resend_action()
                     self.last_send_time = current_time
                 else:
                     print(f"❌ [Mode 2] 放棄重試遙控指令: {self.last_cmd}")
-                    self.ctx['is_cmd_acked'] = True
+                    self.ctx['bt'].is_cmd_acked = True
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         
-        bt_status = "Connected" if self.ctx.get('bt') else "DISCONNECTED"
-        bt_color = (0, 255, 0) if self.ctx.get('bt') else (0, 0, 255)
+        is_bt_connected = self.ctx.get('bt') and self.ctx['bt'].is_connected
+        bt_status = "Connected" if is_bt_connected else "DISCONNECTED"
+        bt_color = (0, 255, 0) if is_bt_connected else (0, 0, 255)
         eraser_str = "ON" if self.eraser_on else "OFF"
-        
-        # HUD 顯示遙控資訊與板擦狀態
         cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status} | Eraser: {eraser_str}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
-        cv2.putText(hud_frame, f"Target Abs Angle: {self.target_angle:.1f} (I/K adjust)", (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
+        cv2.putText(hud_frame, f"Target Abs Angle: {self.target_angle:.1f} (I/K adjust)", (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def _send_manual_cmd(self, cmd):
@@ -423,10 +309,7 @@ class ManualControlMode(BaseMode):
             return
 
         print(f"🕹️ 遙控發送: {cmd}")
-        # 將指令推入背景驗證池
-        self.ctx['pending_cmd'] = cmd
-        self.ctx['is_cmd_acked'] = False
-        bt.send_action(cmd)
+        bt.send_new_action(cmd)
         
         self.last_cmd = cmd
         self.last_send_time = time.time()
@@ -436,21 +319,17 @@ class ManualControlMode(BaseMode):
         if key in [ord('i'), ord('I')]:
             self.target_angle = (self.target_angle + 5.0) % 360
             if self.target_angle > 180.0: self.target_angle -= 360.0
-            print(f" 相對角度移動為: {self.target_angle:.1f}°")
+            print(f"🔄 絕對角度設定為: {self.target_angle:.1f}°")
         elif key in [ord('k'), ord('K')]:
             self.target_angle -= 5.0
             if self.target_angle < -180.0: self.target_angle += 360.0
-            print(f" 相對角度移動為: {self.target_angle:.1f}°")
-        
-        # 動作控制
+            print(f"🔄 絕對角度設定為: {self.target_angle:.1f}°")
         elif key in [ord('w'), ord('W')]: self._send_manual_cmd("F")
-        elif key in [ord('x'), ord('X')]: self._send_manual_cmd("B")  # 完美對接 Arduino 的 'B'
+        elif key in [ord('x'), ord('X')]: self._send_manual_cmd("B")  
         elif key in [ord('s'), ord('S'), 32]: self._send_manual_cmd("S")
         elif key in [ord('l'), ord('L')]: self._send_manual_cmd(f"L{self.target_angle:.1f}")
         elif key in [ord('r'), ord('R')]: self._send_manual_cmd(f"R{self.target_angle:.1f}")
         elif key in [ord('z'), ord('Z')]: self._send_manual_cmd("Z")
-        
-        # 板擦馬達控制
         elif key in [ord('e'), ord('E')]: self._send_manual_cmd("P")
         elif key in [ord('q'), ord('Q')]: self._send_manual_cmd("Y")
 
@@ -487,13 +366,12 @@ def setup_roi_manually(cap):
     cv2.destroyWindow("Select ROI (Whiteboard Area)")
     return clicked_points
 
-
 # ==========================================
 #  5. 主程式控制中樞 (Main Context)
 # ==========================================
 def main():
     print("\n" + "=" * 40)
-    print("🚗 智慧自動擦拭機器人 - 絕對嚴格通訊版")
+    print("🚗 智慧自動擦拭機器人 - 輕量化架構版")
     print("=" * 40)
 
     cap = cv2.VideoCapture(0)
@@ -505,26 +383,24 @@ def main():
         cap.release()
         return
 
-    # 【修改】將 RES_SCALE 傳入各個模組中
+    # 在一開始就直接實例化藍牙管理員（它內部會自己起 Thread）
+    bt_manager = None
+    if BT_AVAILABLE:
+        bt_manager = BTInterface(port=BLUETOOTH_PORT)
+
+    # Context 變得超級乾淨，只保留實體物件
     shared_context = {
         'vision': VisionManager(RES_SCALE),
         'extractor': FeatureExtractor(RES_SCALE),
         'robot': Robot(),
-        # Whiteboard 也需要縮放長寬與網格大小
         'whiteboard': Whiteboard(width=int(640 * RES_SCALE), 
                                  height=int(480 * RES_SCALE), 
                                  cell_size=int(20 * RES_SCALE)),
         'planner': CleaningPlanner(RES_SCALE),
         'visualizer': Visualizer(roi_polygon),  
         'roi_polygon': roi_polygon,
-        'bt': None,                 
-        'is_cmd_acked': True,       
-        'pending_cmd': None,        
-        'bt_should_connect': False  
+        'bt': bt_manager                 
     }
-
-    bt_thread = threading.Thread(target=bluetooth_worker, args=(shared_context,), daemon=True)
-    bt_thread.start()
 
     modes = {
         0: FullControlMode(shared_context),
@@ -548,9 +424,7 @@ def main():
             target_idx = int(chr(key))
             if target_idx != current_mode_idx and target_idx in modes:
                 if current_mode_idx in [0, 2] and shared_context.get('bt'):
-                    shared_context['pending_cmd'] = "S"
-                    shared_context['is_cmd_acked'] = False
-                    shared_context['bt'].send_action("S")
+                    shared_context['bt'].send_new_action("S")
 
                 current_mode_idx = target_idx
                 current_mode = modes[current_mode_idx]
