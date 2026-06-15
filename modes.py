@@ -126,10 +126,19 @@ class FullControlMode(BaseMode):
                     target_abs_angle = 0.0
                     delta_angle = 0.0
                     if target is not None:
-                        delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
+                        # 🌟 角度計算：永遠以 ArUco 中點 (旋轉軸心) 當作方向基準
+                        delta_angle, _, target_abs_angle = self.ctx['planner'].get_relative_movement(
                             self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y, self.ctx['robot'].angle, target[0], target[1]
                         )
-                    
+                        
+                        # 🌟 距離計算：依據任務不同，切換實體參考點
+                        if self.is_returning_home:
+                            # 回家了沒 -> 用 ArUco 中點當距離依據
+                            pixel_dist = np.hypot(self.ctx['robot'].aruco_x - target[0], self.ctx['robot'].aruco_y - target[1])
+                        else:
+                            # 擦字跡到了沒 -> 用板擦中點 (robot.x, robot.y) 當距離依據
+                            pixel_dist = np.hypot(self.ctx['robot'].x - target[0], self.ctx['robot'].y - target[1])
+
                     # 🌟 修改：馬達控制訊號與抵達判定
                     if self.is_cleaning and target is not None and not self.eraser_on and not self.is_returning_home:
                         new_cmd = "P"  # 清潔時開馬達
@@ -139,11 +148,19 @@ class FullControlMode(BaseMode):
                         if target is not None:
                             if pixel_dist < int(20 * current_scale):  
                                 if self.is_returning_home:
-                                    print("🏠 [自動復位成功] 已安全回到初始起點！")
-                                    new_cmd = "S"
-                                    self.is_cleaning = False
-                                    self.is_returning_home = False
-                                    self.home_pos = None
+                                    angle_diff = self.home_angle - self.ctx['robot'].angle
+                                    if angle_diff > 180: angle_diff -= 360
+                                    elif angle_diff < -180: angle_diff += 360
+                                    
+                                    if abs(angle_diff) > 10:
+                                        direction = "R" if angle_diff > 0 else "L"
+                                        new_cmd = f"{direction}{abs(angle_diff):.1f}"
+                                        print(f"🔄 [姿態校正] 已達原點，原地轉正車頭中: {new_cmd}")
+                                    else:
+                                        print("🏠 [自動復位成功] 已安全回到基地且車頭對齊！(基地座標將持續保留)")
+                                        new_cmd = "S"
+                                        self.is_cleaning = False
+                                        self.is_returning_home = False
                                 else:
                                     new_cmd = "S"
                                     self.ctx['planner'].mark_as_visited(target[0], target[1])
@@ -229,8 +246,10 @@ class FullControlMode(BaseMode):
     def handle_key(self, key):
         if key == ord('h'):
             if self.ctx['robot'].x is not None:
-                self.home_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
-                print(f"\n🏠 [熱鍵設定] 更新車體的復位起點為: {self.home_pos}")
+                # 🌟 改用 ArUco 座標當作基地位置
+                self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
+                self.home_angle = self.ctx['robot'].angle
+                print(f"\n🏠 [熱鍵設定] 更新復位基地(ArUco軸心)為: {self.home_pos}, 角度: {self.home_angle:.1f}°")
             else:
                 print("\n❌ [錯誤] 畫面上找不到車子標籤，無法設定起點！請確保車子在視線內。")
                 
@@ -239,15 +258,18 @@ class FullControlMode(BaseMode):
                 print("\n▶️ [Mode 0] 開始自動擦拭")
                 
                 if getattr(self, 'home_pos', None) is None:
-                    self.home_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
-                    print(f"📍 [自動紀錄] 由於尚未手動設定，已將當下位置設為起點: {self.home_pos}")
+                    # 🌟 自動記錄時也用 ArUco 座標
+                    self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
+                    self.home_angle = self.ctx['robot'].angle
+                    print(f"📍 [自動紀錄] 建立專屬基地位置: {self.home_pos}, 角度: {self.home_angle:.1f}°")
                 else:
-                    print(f"📍 [保留設定] 將會回到您先前設定的起點: {self.home_pos}")
+                    print(f"📍 [保留設定] 任務結束將回到專屬基地: {self.home_pos}, 角度: {self.home_angle:.1f}°")
                     
                 self.is_returning_home = False
                 self.is_cleaning = True
             else:
                 print("\n❌ [錯誤] 尚未辨識到車體標籤，請確保 ArUco 在畫面中再啟動！")
+                
         elif key == ord('p'):
             print("\n⏸️ [Mode 0] 暫停待機")
             self.is_cleaning = False
