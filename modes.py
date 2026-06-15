@@ -44,6 +44,9 @@ class FullControlMode(BaseMode):
         self.ack_start_pos = None
         self.ack_start_angle = None
 
+        self.home_pos = None
+        self.is_returning_home = False
+
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動控制模式 (藍牙自動連線已啟動)")
         if self.ctx.get('bt'):
@@ -99,7 +102,16 @@ class FullControlMode(BaseMode):
                         self.ack_start_pos = None
 
                 dirty_list = self.ctx['whiteboard'].get_dirty_list()
-                target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
+                
+                if self.is_returning_home:
+                    target = self.home_pos # 如果在復位模式，死命盯著起點走就好
+                else:
+                    target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
+                    # 如果字跡擦完了，且有起點紀錄，無縫切換到自動復位模式
+                    if target is None and self.home_pos is not None:
+                        print("🎉 全部的擦拭結束！啟動自動復位，準備回家...")
+                        self.is_returning_home = True
+                        target = self.home_pos
 
                 if self.ctx.get('bt'):
                     if self.ctx['bt'].is_cmd_acked:
@@ -107,7 +119,7 @@ class FullControlMode(BaseMode):
                         elif self.last_cmd == "Y": self.eraser_on = False
 
                     if getattr(self.ctx['bt'], 'is_action_finished', False):
-                        self.last_cmd = None  # 騙過程式，讓它認為是全新的指令
+                        self.last_cmd = None  
                         self.ctx['bt'].is_action_finished = False
                     
                     pixel_dist = 0.0
@@ -118,16 +130,24 @@ class FullControlMode(BaseMode):
                             self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y, self.ctx['robot'].angle, target[0], target[1]
                         )
                     
-                    if self.is_cleaning and target is not None and not self.eraser_on:
-                        new_cmd = "P"  
-                    elif (not self.is_cleaning or target is None) and self.eraser_on:
-                        new_cmd = "Y"  
+                    # 🌟 修改：馬達控制訊號與抵達判定
+                    if self.is_cleaning and target is not None and not self.eraser_on and not self.is_returning_home:
+                        new_cmd = "P"  # 清潔時開馬達
+                    elif (not self.is_cleaning or target is None or self.is_returning_home) and self.eraser_on:
+                        new_cmd = "Y"  # 只要準備回家，或者結束了，二話不說先關馬達
                     else:
                         if target is not None:
-                            if pixel_dist < int(15 * current_scale):  
-                                new_cmd = "S"
-                                self.ctx['planner'].mark_as_visited(target[0], target[1])
-                                self.ctx['planner'].current_target = None
+                            if pixel_dist < int(20 * current_scale):  
+                                if self.is_returning_home:
+                                    print("🏠 [自動復位成功] 已安全回到初始起點！")
+                                    new_cmd = "S"
+                                    self.is_cleaning = False
+                                    self.is_returning_home = False
+                                    self.home_pos = None
+                                else:
+                                    new_cmd = "S"
+                                    self.ctx['planner'].mark_as_visited(target[0], target[1])
+                                    self.ctx['planner'].current_target = None
                             elif abs(delta_angle) > 165:  
                                 new_cmd = "B"
                             elif abs(delta_angle) > 15:
@@ -137,19 +157,6 @@ class FullControlMode(BaseMode):
                                 new_cmd = "F"
                         else:
                             new_cmd = "S"
-
-                        roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
-                        
-                        dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
-                        
-                        safe_margin = int(25 * current_scale) 
-                        
-                        if 0 <= dist_to_edge < safe_margin:
-                            print(f" 距離邊界僅 {dist_to_edge:.1f}px，緊急迴避！")
-                            if new_cmd == "F":
-                                new_cmd = "B"
-                            elif new_cmd != "F":
-                                new_cmd = "S"
 
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
@@ -202,10 +209,27 @@ class FullControlMode(BaseMode):
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def handle_key(self, key):
-        # 原本邏輯保持不變...
-        if key == ord('s'):
-            print("\n▶️ [Mode 0] 開始自動擦拭")
-            self.is_cleaning = True
+        if key == ord('h'):
+            if self.ctx['robot'].x is not None:
+                self.home_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
+                print(f"\n🏠 [熱鍵設定] 更新車體的復位起點為: {self.home_pos}")
+            else:
+                print("\n❌ [錯誤] 畫面上找不到車子標籤，無法設定起點！請確保車子在視線內。")
+                
+        elif key == ord('s'):
+            if self.ctx['robot'].x is not None:
+                print("\n▶️ [Mode 0] 開始自動擦拭")
+                
+                if getattr(self, 'home_pos', None) is None:
+                    self.home_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
+                    print(f"📍 [自動紀錄] 由於尚未手動設定，已將當下位置設為起點: {self.home_pos}")
+                else:
+                    print(f"📍 [保留設定] 將會回到您先前設定的起點: {self.home_pos}")
+                    
+                self.is_returning_home = False
+                self.is_cleaning = True
+            else:
+                print("\n❌ [錯誤] 尚未辨識到車體標籤，請確保 ArUco 在畫面中再啟動！")
         elif key == ord('p'):
             print("\n⏸️ [Mode 0] 暫停待機")
             self.is_cleaning = False
