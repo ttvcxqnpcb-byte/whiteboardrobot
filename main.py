@@ -144,12 +144,19 @@ class FullControlMode(BaseMode):
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-        ink_mask, robot_mask_pts = self.ctx['vision'].get_ink_clean_mask(frame, exclude_polygon=robot_corners, roi_polygon=self.ctx['roi_polygon'])
-        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
 
+        # 2. 先更新車體狀態，並取得最新的車體遮罩
+        robot_mask_pts = None
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
-            self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
+            robot_mask_pts = self.ctx['robot'].get_mask_polygon()
+
+        # 3. 將車體遮罩丟給視覺模組去找髒污
+        ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
+        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
+
+        # 4. 更新白板髒污矩陣
+        self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
         if self.is_cleaning:
             if robot_center is None:
@@ -296,11 +303,15 @@ class VisionDebugMode(BaseMode):
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-        ink_mask, robot_mask_pts = self.ctx['vision'].get_ink_clean_mask(frame, exclude_polygon=robot_corners, roi_polygon=self.ctx['roi_polygon'])
-        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
-
+        
+        robot_mask_pts = None
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
+            robot_mask_pts = self.ctx['robot'].get_mask_polygon()
+
+        ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
+        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
+
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
@@ -341,11 +352,15 @@ class ManualControlMode(BaseMode):
     def process_frame(self, frame):
         aruco_mask = self.ctx['vision'].get_aruco_ready_mask(frame, roi_polygon=self.ctx['roi_polygon'])
         robot_center, robot_corners = self.ctx['extractor'].extract_robot_pose(aruco_mask)
-        ink_mask, robot_mask_pts = self.ctx['vision'].get_ink_clean_mask(frame, exclude_polygon=robot_corners, roi_polygon=self.ctx['roi_polygon'])
-        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
 
+        robot_mask_pts = None
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
+            robot_mask_pts = self.ctx['robot'].get_mask_polygon()
+
+        ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
+        dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
+
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
         # 追蹤並更新板擦狀態 (對應 Arduino 回傳的 ACK)
