@@ -97,17 +97,21 @@ class FullControlMode(BaseMode):
                     if self.ctx['bt'].is_cmd_acked:
                         if self.last_cmd == "P": self.eraser_on = True
                         elif self.last_cmd == "Y": self.eraser_on = False
-
+                    
+                    pixel_dist = 0.0
+                    target_abs_angle = 0.0
+                    delta_angle = 0.0
+                    if target is not None:
+                        delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
+                            self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
+                        )
+                    
                     if self.is_cleaning and target is not None and not self.eraser_on:
                         new_cmd = "P"  
                     elif (not self.is_cleaning or target is None) and self.eraser_on:
                         new_cmd = "Y"  
                     else:
                         if target is not None:
-                            delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
-                                self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
-                            )
-
                             if pixel_dist < int(5 * current_scale):  
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_as_visited(target[0], target[1])
