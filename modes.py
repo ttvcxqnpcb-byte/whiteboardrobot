@@ -116,11 +116,11 @@ class FullControlMode(BaseMode):
                         new_cmd = "Y"  
                     else:
                         if target is not None:
-                            if pixel_dist < int(5 * current_scale):  
+                            if pixel_dist < int(15 * current_scale):  
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_as_visited(target[0], target[1])
                                 self.ctx['planner'].current_target = None
-                            elif abs(delta_angle) > 150:  
+                            elif abs(delta_angle) > 165:  
                                 new_cmd = "B"
                             elif abs(delta_angle) > 15:
                                 direction = "R" if delta_angle > 0 else "L"
