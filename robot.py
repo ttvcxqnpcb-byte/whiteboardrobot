@@ -13,6 +13,8 @@ class Robot:
         self.target_x = None
         self.target_y = None
 
+        self.mask_polygon = None
+
     def update_state(self, center, corners):
         if center is None or corners is None:
             return
@@ -49,6 +51,36 @@ class Robot:
         self.x = int(self.aruco_x + dir_x * eraser_offset)
         self.y = int(self.aruco_y + dir_y * eraser_offset)
 
+        poly_pts = np.array(corners, dtype=np.float32)
+        pt_TL, pt_TR, pt_BR, pt_BL = poly_pts[0], poly_pts[1], poly_pts[2], poly_pts[3]
+        poly_center = np.mean(poly_pts, axis=0)
+        
+        vec_forward = ((pt_TL + pt_TR) / 2.0) - ((pt_BL + pt_BR) / 2.0)
+        marker_length_mask = np.linalg.norm(vec_forward)
+        dir_forward_mask = vec_forward / (marker_length_mask + 1e-5) 
+        
+        vec_right = ((pt_TR + pt_BR) / 2.0) - ((pt_TL + pt_BL) / 2.0)
+        marker_width = np.linalg.norm(vec_right)
+        dir_right_mask = vec_right / (marker_width + 1e-5) 
+        
+        motor_fwd   = marker_length_mask * 1.05   
+        wheel_start = marker_length_mask * -0.10  
+        body_bwd    = marker_length_mask * 1.15   
+        
+        narrow_side = marker_width * 0.75     
+        wheel_side  = marker_width * 1.0      
+        
+        pt1 = poly_center + (dir_forward_mask * motor_fwd)   - (dir_right_mask * narrow_side)
+        pt2 = poly_center + (dir_forward_mask * motor_fwd)   + (dir_right_mask * narrow_side)
+        pt3 = poly_center + (dir_forward_mask * wheel_start) + (dir_right_mask * narrow_side)
+        pt4 = poly_center + (dir_forward_mask * wheel_start) + (dir_right_mask * wheel_side)
+        pt5 = poly_center - (dir_forward_mask * body_bwd)    + (dir_right_mask * wheel_side)
+        pt6 = poly_center - (dir_forward_mask * body_bwd)    - (dir_right_mask * wheel_side)
+        pt7 = poly_center + (dir_forward_mask * wheel_start) - (dir_right_mask * wheel_side)
+        pt8 = poly_center + (dir_forward_mask * wheel_start) - (dir_right_mask * narrow_side)
+        
+        self.mask_polygon = np.array([pt1, pt2, pt3, pt4, pt5, pt6, pt7, pt8], dtype=np.int32)
+
     def update_target(self, target_x, target_y):
         self.has_target = True
         self.target_x = target_x
@@ -63,6 +95,9 @@ class Robot:
             "target_x" : self.target_x,
             "target_y" : self.target_y
         }
+    
+    def get_mask_polygon(self):
+        return self.mask_polygon
 
     def __str__(self):
         return f"Robot Pose -> X: {self.x}, Y: {self.y}, Angle: {self.angle:.1f}°"
