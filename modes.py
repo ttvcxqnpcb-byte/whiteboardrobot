@@ -103,7 +103,7 @@ class FullControlMode(BaseMode):
                     delta_angle = 0.0
                     if target is not None:
                         delta_angle, pixel_dist, target_abs_angle = self.ctx['planner'].get_relative_movement(
-                            self.ctx['robot'].x, self.ctx['robot'].y, self.ctx['robot'].angle, target[0], target[1]
+                            self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y, self.ctx['robot'].angle, target[0], target[1]
                         )
                     
                     if self.is_cleaning and target is not None and not self.eraser_on:
@@ -118,7 +118,7 @@ class FullControlMode(BaseMode):
                                 self.ctx['planner'].current_target = None
                             elif abs(delta_angle) > 15:
                                 direction = "R" if delta_angle > 0 else "L"
-                                new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                new_cmd = f"{direction}{abs(delta_angle):.1f}"
                             else:
                                 new_cmd = "F"
                         else:
