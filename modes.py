@@ -315,4 +315,4 @@ class ManualControlMode(BaseMode):
         elif key in [ord('r'), ord('R')]: self._send_manual_cmd(f"R{self.target_angle:.1f}")
         elif key in [ord('z'), ord('Z')]: self._send_manual_cmd("Z")
         elif key in [ord('e'), ord('E')]: self._send_manual_cmd("P")
-        elif key in [ord('q'), ord('Q')]: self._send_manual_cmd("Y")
+        elif key in [ord('y'), ord('Y')]: self._send_manual_cmd("Y")
