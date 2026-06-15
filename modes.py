@@ -67,12 +67,20 @@ class FullControlMode(BaseMode):
             if robot_center is None:
                 self.lost_frames_count += 1
                 if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                    if self.ctx.get('bt') and self.last_cmd != "S": 
-                        print("⚠️ 警告：丟失車體標籤！啟動緊急停止並等待確認！")
-                        self.ctx['bt'].send_new_action("S")
-                        self.last_cmd = "S"
-                        self.last_send_time = time.time()
-                        self.retry_count = 0
+                    if self.ctx.get('bt') : 
+                        if self.last_cmd == "F":
+                            rescue_cmd = "B" 
+                            print("⚠️ 警告：丟失標籤！判斷為過衝，嘗試盲退自救！")
+                        else:
+                            rescue_cmd = "S" 
+                            print("⚠️ 警告：丟失標籤！啟動緊急停止！")
+                            
+                        if self.last_cmd != rescue_cmd:
+                            self.ctx['bt'].send_new_action(rescue_cmd)
+                            self.last_cmd = rescue_cmd
+                            self.last_send_time = time.time()
+                            self.retry_count = 0
+
                     self.lost_frames_count = self.MAX_LOST_FRAMES 
             else:
                 self.lost_frames_count = 0
@@ -129,6 +137,19 @@ class FullControlMode(BaseMode):
                                 new_cmd = "F"
                         else:
                             new_cmd = "S"
+
+                        roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
+                        
+                        dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
+                        
+                        safe_margin = int(25 * current_scale) 
+                        
+                        if 0 <= dist_to_edge < safe_margin:
+                            print(f" 距離邊界僅 {dist_to_edge:.1f}px，緊急迴避！")
+                            if new_cmd == "F":
+                                new_cmd = "B"
+                            elif new_cmd != "F":
+                                new_cmd = "S"
 
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
