@@ -321,10 +321,11 @@ class ManualControlMode(BaseMode):
         self.last_cmd = None
         self.last_send_time = 0
         self.RETRY_COOLDOWN = 0.5
-        self.MAX_RETRIES = 5         
+        self.MAX_RETRIES = 50         
         self.retry_count = 0
         self.lost_frames_count = 0
         self.MAX_LOST_FRAMES = 5
+        self.eraser_on = False
 
     def activate(self):
         print("\n🕹️ [Mode 2] 已切換至測試遙控模式！(藍牙自動連線已啟動)")
@@ -340,6 +341,10 @@ class ManualControlMode(BaseMode):
         if robot_center is not None:
             self.ctx['robot'].update_state(robot_center, robot_corners)
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
+
+        if self.ctx.get('bt') and self.ctx['is_cmd_acked']:
+            if self.last_cmd == "P": self.eraser_on = True
+            elif self.last_cmd == "Y": self.eraser_on = False
 
         if robot_center is None:
             self.lost_frames_count += 1
@@ -375,13 +380,19 @@ class ManualControlMode(BaseMode):
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         bt_status = "Connected" if self.ctx.get('bt') else "DISCONNECTED"
         bt_color = (0, 255, 0) if self.ctx.get('bt') else (0, 0, 255)
-        cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
+        eraser_str = "ON" if self.eraser_on else "OFF"
+        cv2.putText(hud_frame, f"MODE 2: TEST RC | BT: {bt_status} | Eraser: {eraser_str}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
+        
         cv2.putText(hud_frame, f"Target Abs Angle: {self.target_angle:.1f} (I/K adjust)", (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def _send_manual_cmd(self, cmd):
         bt = self.ctx.get('bt')
         if not bt: return
+        
+        if cmd == self.last_cmd:
+            return
+
         print(f"🕹️ 遙控發送: {cmd}")
         self.ctx['pending_cmd'] = cmd
         self.ctx['is_cmd_acked'] = False
