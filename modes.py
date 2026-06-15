@@ -245,19 +245,6 @@ class ManualControlMode(BaseMode):
             if self.last_cmd == "P": self.eraser_on = True
             elif self.last_cmd == "Y": self.eraser_on = False
 
-        if robot_center is None:
-            self.lost_frames_count += 1
-            if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                if self.last_cmd and self.last_cmd[0] not in ["S", "Z"]:
-                    if self.ctx.get('bt'): 
-                        print("⚠️ [Mode 2] 警告：遙控時丟失標籤！強硬煞車！")
-                        self.ctx['bt'].send_new_action("S")
-                        self.last_cmd = "S"
-                        self.last_send_time = time.time()
-                        self.retry_count = 0
-                self.lost_frames_count = self.MAX_LOST_FRAMES 
-        else:
-            self.lost_frames_count = 0
 
         # 重傳機制
         if self.last_cmd is not None and self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked:
