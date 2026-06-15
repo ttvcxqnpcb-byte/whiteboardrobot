@@ -178,7 +178,7 @@ class FullControlMode(BaseMode):
 # ==========================================
 class VisionDebugMode(BaseMode):
     def activate(self):
-        print("\n👁️ [Mode 1] 已切換至純視覺除錯模式 (自動關閉藍牙)")
+        print("\n [Mode 1] 已切換至純視覺除錯模式 (自動關閉藍牙)")
         if self.ctx.get('bt'):
             self.ctx['bt'].disable_auto_connect()
         self.ctx['planner'].current_target = None 

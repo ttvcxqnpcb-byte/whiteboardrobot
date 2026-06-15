@@ -6,8 +6,6 @@ from robot import Robot
 from whiteboard import Whiteboard
 from planner import CleaningPlanner
 from display import Visualizer
-
-# --- 將剛剛抽離的模式從 modes.py 匯入 ---
 from modes import FullControlMode, VisionDebugMode, ManualControlMode
 
 try:
