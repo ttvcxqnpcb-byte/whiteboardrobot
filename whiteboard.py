@@ -14,19 +14,15 @@ class Whiteboard:
         self.dirty_list.clear()
         
         for x, y, w, h, tx, ty in dirty_rects:
-            center_x = tx
-            center_y = ty
-            
-            if 0 <= center_x < self.width and 0 <= center_y < self.height:
-                dirty_info = {
-                    "cx": center_x, 
-                    "cy": center_y,
-                    "x": x,
-                    "y": y,
-                    "w": w,
-                    "h": h,
-                }
-                self.dirty_list.append(dirty_info)
+            dirty_info = {
+                "cx": tx, 
+                "cy": ty,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+            }
+            self.dirty_list.append(dirty_info)
 
     def get_dirty_list(self):
         return self.dirty_list

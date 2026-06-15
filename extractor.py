@@ -13,7 +13,6 @@ class FeatureExtractor:
         """
         [解碼車車] 從犀利黑白圖中榨取出機器人的中心點與四個角點
         """
-        # 【修改這行】改用 detector 物件來呼叫 detectMarkers
         corners, ids, _ = self.detector.detectMarkers(aruco_mask)
         
         if ids is not None and 17 in ids:
@@ -23,7 +22,8 @@ class FeatureExtractor:
             return center, c 
         return None, None
 
-    def extract_dirty_rects(self, ink_clean_mask, min_area=20):
+    # 【修復】預設值改為 None，使 res_scale 的縮放能夠正確生效
+    def extract_dirty_rects(self, ink_clean_mask, min_area=None):
         if min_area is None:
             min_area = int(20 * (self.res_scale ** 2))
 
@@ -36,10 +36,11 @@ class FeatureExtractor:
                 
             x, y, w, h = cv2.boundingRect(cnt)
             
-            real_ink_pt = cnt[0][0] 
-            tx, ty = int(real_ink_pt[0]), int(real_ink_pt[1])
+            # 【保留】遵照原本的刻意設計，抓取輪廓實體邊緣上的點
+            real_ink_pt = cnt[0][0]
+            tx = int(real_ink_pt[0])
+            ty = int(real_ink_pt[1])
             
-            # 把原本的 4 個值變成 6 個值回傳
             dirty_rects.append((x, y, w, h, tx, ty))
             
         return dirty_rects
