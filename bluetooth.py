@@ -142,4 +142,5 @@ class BTInterface:
     def _send_raw(self, cmd):
         """底層發送，負責加上換行符號"""
         if self.is_connected and self.bridge:
-            self.bridge.send(cmd + "\n")
+            # 【修正】加上 \r\n (Carriage Return + Line Feed)
+            self.bridge.send(cmd + "\r\n")

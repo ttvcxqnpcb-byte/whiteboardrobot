@@ -81,8 +81,11 @@ class HM10ESP32Bridge:
     def listen(self):
         logs = self._read_bt_com_payloads()
         data_parts = [l for l in logs if not l.startswith("OK+")]
-        return "".join(data_parts)
+        # 【修正】改用空白或換行連接，避免字元黏死在一起
+        return "\n".join(data_parts)
 
     def send(self, text):
         if self.debug: print(f"    [底層發送] {text.strip()}")
         self.ser.write(text.encode('utf-8'))
+        # 【修正】強制清空作業系統緩衝區，立刻發射給藍牙模組！
+        self.ser.flush()
