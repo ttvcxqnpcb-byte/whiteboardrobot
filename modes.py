@@ -41,12 +41,13 @@ class FullControlMode(BaseMode):
         self.lost_frames_count = 0
         self.MAX_LOST_FRAMES = MAX_LOST_FRAMES
         
-        # 🌟 新增：紀錄發送指令當下的實體狀態，用於視覺代償
         self.ack_start_pos = None
         self.ack_start_angle = None
 
         self.home_pos = None
         self.is_returning_home = False
+
+        self.cached_roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
 
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動控制模式 (藍牙自動連線已啟動)")
@@ -152,7 +153,7 @@ class FullControlMode(BaseMode):
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
                                     if angle_diff > 180: angle_diff -= 360
                                     elif angle_diff < -180: angle_diff += 360
-                                    
+
                                     if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
                                         direction = "R" if angle_diff > 0 else "L"
                                         new_cmd = f"{direction}{self.home_angle:.1f}" #絕對角度
@@ -178,11 +179,8 @@ class FullControlMode(BaseMode):
 
                     if target is not None:
                         # 將 ROI 轉為 numpy array 以便計算
-                        roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
-                        
-                        # 1. 分別測量「車頭 (板擦中心)」與「車尾 (ArUco 旋轉軸心)」距離牆壁的最短距離
-                        dist_front = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
-                        dist_back = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y), True)
+                        dist_front = cv2.pointPolygonTest(self.cached_roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
+                        dist_back = cv2.pointPolygonTest(self.cached_roi_array, (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y), True)
                         
                         # 使用設定檔中抽離的安全距離參數
                         safe_margin = int(SAFE_MARGIN_BASE * current_scale)
