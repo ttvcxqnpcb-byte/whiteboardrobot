@@ -80,43 +80,34 @@ class Robot:
         rvec = None
         tvec = None
 
-        # 1. 先嘗試用上一幀的記憶進行穩定追蹤
-        if getattr(self, 'last_rvec', None) is not None and getattr(self, 'last_tvec', None) is not None:
-            success_track, rvec_track, tvec_track = cv2.solvePnP(
-                self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
-                rvec=self.last_rvec, tvec=self.last_tvec, 
-                useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE
-            )
-            # 檢查追蹤結果是否合理 (Z值不可突然變得太大，容許邊緣些微的正數，但避免漸進式翻轉)
-            if success_track:
-                R_track, _ = cv2.Rodrigues(rvec_track)
-                if R_track[2, 2] < 0.3: 
-                    success = True
-                    rvec = rvec_track
-                    tvec = tvec_track
+        # 1. 每次都讓 OpenCV 吐出所有的可能解
+        success_gen, rvecs, tvecs, reproj_errs = cv2.solvePnPGeneric(
+            self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
+            flags=cv2.SOLVEPNP_IPPE_SQUARE
+        )
 
-        # 2. 如果追蹤失敗，或剛開機，啟用「雙解評估」找出最合理的姿態
-        if not success:
-            # solvePnPGeneric 會同時回傳正向解與反向解
-            success_gen, rvecs, tvecs, _ = cv2.solvePnPGeneric(
-                self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
-                flags=cv2.SOLVEPNP_IPPE_SQUARE
-            )
-            
-            if success_gen and len(rvecs) > 0:
-                best_idx = 0
-                if len(rvecs) > 1:
-                    # 🌟 核心魔法：比較兩個解的 Z 軸法向量，選擇數值「最小(最負)」的那一個
-                    # 這代表動態選擇「最平行於相機感光元件」的姿態，完美解決邊緣透視翻轉！
+        if success_gen and len(rvecs) > 0:
+            best_idx = 0
+            if len(rvecs) > 1:
+                # 🌟 核心進化：時間連續性 (Temporal Consistency)
+                if getattr(self, 'last_rvec', None) is not None:
+                    # 計算兩個解與上一幀姿態的「旋轉差異 (歐氏距離)」
+                    # 物理上車子不可能瞬間翻面，所以差距最小的絕對是正確解！
+                    dist0 = np.linalg.norm(rvecs[0] - self.last_rvec)
+                    dist1 = np.linalg.norm(rvecs[1] - self.last_rvec)
+                    
+                    if dist1 < dist0:
+                        best_idx = 1
+                else:
+                    # 如果剛開機還沒有記憶，才退回使用 Z 軸法向量當作第一眼防呆
                     z_val_0 = cv2.Rodrigues(rvecs[0])[0][2, 2]
                     z_val_1 = cv2.Rodrigues(rvecs[1])[0][2, 2]
-                    
                     if z_val_1 < z_val_0:
                         best_idx = 1
                         
-                rvec = rvecs[best_idx]
-                tvec = tvecs[best_idx]
-                success = True
+            rvec = rvecs[best_idx]
+            tvec = tvecs[best_idx]
+            success = True
 
         if success:
             # 成功算出姿態後，立刻更新記憶給下一幀
