@@ -22,7 +22,6 @@ class FeatureExtractor:
             return center, c 
         return None, None
 
-    # 【修復】預設值改為 None，使 res_scale 的縮放能夠正確生效
     def extract_dirty_rects(self, ink_clean_mask, min_area=None):
         if min_area is None:
             min_area = int(20 * (self.res_scale ** 2))
@@ -36,10 +35,15 @@ class FeatureExtractor:
                 
             x, y, w, h = cv2.boundingRect(cnt)
             
-            # 【保留】遵照原本的刻意設計，抓取輪廓實體邊緣上的點
-            real_ink_pt = cnt[0][0]
-            tx = int(real_ink_pt[0])
-            ty = int(real_ink_pt[1])
+            M = cv2.moments(cnt)
+            if M["m00"] != 0:
+                tx = int(M["m10"] / M["m00"])
+                ty = int(M["m01"] / M["m00"])
+            else:
+                # 極端防呆：若面積過小導致 m00 為 0，退回原本抓邊界點的方法
+                real_ink_pt = cnt[0][0]
+                tx = int(real_ink_pt[0])
+                ty = int(real_ink_pt[1])
             
             dirty_rects.append((x, y, w, h, tx, ty))
             

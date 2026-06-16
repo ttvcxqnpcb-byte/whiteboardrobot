@@ -42,3 +42,11 @@ MAX_LOST_FRAMES = 5
 VISUAL_COMP_DIST_BASE = 10
 # 視覺代償：判定指令已實際作動的旋轉角度 (度)
 VISUAL_COMP_ANGLE = 5.0
+
+# ==========================
+#   (Planner & Watchdog)
+# ==========================
+# 頑固污漬重試次數上限 (解決無限死循環)
+MAX_RESETS = 2
+# 目標攻堅超時時間 - 秒 (解決幽靈目標卡死)
+WATCHDOG_TIMEOUT = 8.0

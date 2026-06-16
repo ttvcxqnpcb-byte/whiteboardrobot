@@ -1,11 +1,13 @@
 # planner.py
 import math
+from config.robot_settings import MAX_RESETS
 
 class CleaningPlanner:
     def __init__(self, res_scale=1.0):
         self.current_target = None 
         self.blacklist = []           
-        self.blacklist_radius = int(15 * res_scale)   
+        self.blacklist_radius = int(15 * res_scale)
+        self.reset_count = 0   
 
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
@@ -21,6 +23,7 @@ class CleaningPlanner:
         # 如果沒有鎖定目標，才張開眼睛看視覺給的 dirty_list 來重新規劃
         if not dirty_list or robot_x is None or robot_y is None:
             self.current_target = None
+            self.reset_count = 0
             return None
 
         # ── 以下為原本的尋找最近目標邏輯 ──
@@ -38,9 +41,14 @@ class CleaningPlanner:
                 valid_targets.append(dirty)
 
         if not valid_targets and len(dirty_list) > 0:
-            print("[Planner] Blacklist reset.")
-            self.blacklist.clear()
-            return None 
+            if self.reset_count < MAX_RESETS:
+                print(f"[Planner] Blacklist reset. (Retry: {self.reset_count + 1}/{MAX_RESETS})")
+                self.blacklist.clear()
+                self.reset_count += 1
+                return None
+            else:
+                print("[Planner] 達重試上限，放棄頑固污漬！")
+                return None
 
         closest_target = None
         min_distance = float('inf')

@@ -49,6 +49,9 @@ class FullControlMode(BaseMode):
 
         self.cached_roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
 
+        self.target_start_time = 0
+        self.current_target_cache = None
+
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動控制模式 (藍牙自動連線已啟動)")
         if self.ctx.get('bt'):
@@ -115,6 +118,31 @@ class FullControlMode(BaseMode):
                         self.is_returning_home = True
                         target = self.home_pos
 
+                # 🌟🌟🌟 【新增】目標攻堅看門狗邏輯 (Target Watchdog) 🌟🌟🌟
+                if target is not None and not self.is_returning_home:
+                    if target != self.current_target_cache:
+                        # 換了新目標，重新計時
+                        self.current_target_cache = target
+                        self.target_start_time = time.time()
+                    elif time.time() - self.target_start_time > WATCHDOG_TIMEOUT:
+                        print(f"🚨 [看門狗] 攻堅目標 {target} 超時 ({WATCHDOG_TIMEOUT}s)！強制放棄並倒車脫困！")
+                        # 將目標打入黑名單
+                        self.ctx['planner'].mark_as_visited(target[0], target[1])
+                        self.ctx['planner'].current_target = None
+                        self.current_target_cache = None
+                        target = None # 把這幀的 target 清空
+                        
+                        # 覆寫為強制倒車指令
+                        if self.ctx.get('bt'):
+                            self.ctx['bt'].send_new_action("B")
+                            self.last_cmd = "B"
+                            self.last_send_time = time.time()
+                            self.retry_count = 0
+                        return # 提早結束這幀，下一幀重新尋找目標
+                elif target is None:
+                    self.current_target_cache = None
+
+                    
                 if self.ctx.get('bt'):
                     if self.ctx['bt'].is_cmd_acked:
                         if self.last_cmd == "P": self.eraser_on = True
