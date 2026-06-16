@@ -241,6 +241,21 @@ class FullControlMode(BaseMode):
         bt_color = (0, 255, 0) if is_bt_connected else (0, 0, 255)
         state_str = "Running" if self.is_cleaning else "Standby"
         cv2.putText(hud_frame, f"MODE 0: AUTO ({state_str}) | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
+        
+        # 🌟 畫出 3D 立體透視框骨架 (Wireframe Debug)
+        box_pts = getattr(self.ctx['robot'], 'box_3d_pts', None)
+        if box_pts is not None and len(box_pts) == 8:
+            # 8 個頂點的連線關係 (Top:0-3, Bottom:4-7, Pillars:0-4,1-5...)
+            edges = [
+                (0,1), (1,2), (2,3), (3,0), # 車頂四邊形
+                (4,5), (5,6), (6,7), (7,4), # 車底四邊形
+                (0,4), (1,5), (2,6), (3,7)  # 四根柱子
+            ]
+            for start, end in edges:
+                pt1 = tuple(box_pts[start])
+                pt2 = tuple(box_pts[end])
+                cv2.line(hud_frame, pt1, pt2, (0, 255, 255), 2) # 用黃色線條畫出
+
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def handle_key(self, key):
@@ -307,6 +322,20 @@ class VisionDebugMode(BaseMode):
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         cv2.putText(hud_frame, "MODE 1: PURE VISION DEBUG (BT Off)", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+
+        box_pts = getattr(self.ctx['robot'], 'box_3d_pts', None)
+        if box_pts is not None and len(box_pts) == 8:
+            edges = [
+                (0,1), (1,2), (2,3), (3,0), # 車頂
+                (4,5), (5,6), (6,7), (7,4), # 車底
+                (0,4), (1,5), (2,6), (3,7)  # 柱子
+            ]
+            for start, end in edges:
+                # 加上 int() 確保 OpenCV 畫線不會因為 numpy 型別報錯
+                pt1 = (int(box_pts[start][0]), int(box_pts[start][1]))
+                pt2 = (int(box_pts[end][0]), int(box_pts[end][1]))
+                cv2.line(hud_frame, pt1, pt2, (0, 255, 255), 2)
+                
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
 
     def handle_key(self, key): pass

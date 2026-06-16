@@ -21,7 +21,7 @@ class Robot:
         # 假設一般 Webcam 視角約 60 度，焦距 f 大約等於畫面寬度
         w = 640 * res_scale
         h = 480 * res_scale
-        focal_length = w 
+        focal_length = w  * 2.5
         self.cam_matrix = np.array([
             [focal_length, 0, w/2],
             [0, focal_length, h/2],
@@ -98,11 +98,14 @@ class Robot:
             projected_pts, _ = cv2.projectPoints(box_3d, rvec, tvec, self.cam_matrix, self.dist_coeffs)
             projected_pts = projected_pts.reshape(-1, 2).astype(np.int32)
             
+            self.box_3d_pts = projected_pts
+
             # 4. 取這些投影點的「凸包 (Convex Hull)」作為最終的 2D 遮罩多邊形
             hull = cv2.convexHull(projected_pts)
             self.mask_polygon = hull.reshape(-1, 2)
         else:
             self.mask_polygon = None
+            self.box_3d_pts = None 
 
     def update_target(self, target_x, target_y):
         self.has_target = True
