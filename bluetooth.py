@@ -104,15 +104,15 @@ class BTInterface:
                     except Exception:
                         continue
                         
-                elif expected_c == 'Z' and ('開始校準' in line or 'y' in line):
+                elif expected_c == 'Z' or ('開始校準' in line or 'y' in line):
                     self.is_cmd_acked = True
                     print(f"✅ 陀螺儀校準已觸發！")
                     break
-                elif expected_c == 'P' and 'ExtraMotor: ON' in line:
+                elif expected_c == 'P' or 'ExtraMotor: ON' in line:
                     self.is_cmd_acked = True
                     print(f"✅ 板擦馬達已啟動！(P)")
                     break
-                elif expected_c == 'Y' and 'ExtraMotor: OFF' in line:
+                elif expected_c == 'Y' or 'ExtraMotor: OFF' in line:
                     self.is_cmd_acked = True
                     print(f"✅ 板擦馬達已關閉！(Y)")
                     break

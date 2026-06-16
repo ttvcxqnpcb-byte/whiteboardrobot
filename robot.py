@@ -76,65 +76,81 @@ class Robot:
         #  🌟 3D 真實空間投影邏輯
         # ==========================================
         img_pts = np.array(corners, dtype=np.float32)
-        
-        # 1. 透過 solvePnP 算出車體在 3D 空間中的旋轉與位移
-        img_pts = np.array(corners, dtype=np.float32)
-        
-        # 1. 透過 solvePnP 算出車體在 3D 空間中的旋轉與位移
-        if self.last_rvec is not None and self.last_tvec is not None:
-            # 如果已經有上一幀的正確記憶，開啟 useExtrinsicGuess 強制演算法穩定追蹤，防止 TOP/BOTTOM 翻轉！
-            success, rvec, tvec = cv2.solvePnP(
+        success = False
+        rvec = None
+        tvec = None
+
+        # 1. 先嘗試用上一幀的記憶進行穩定追蹤
+        if getattr(self, 'last_rvec', None) is not None and getattr(self, 'last_tvec', None) is not None:
+            success_track, rvec_track, tvec_track = cv2.solvePnP(
                 self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
                 rvec=self.last_rvec, tvec=self.last_tvec, 
                 useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE
             )
-        else:
-            # 如果是程式剛啟動，或是剛剛丟失標籤，就用 IPPE_SQUARE 重新尋找初始姿態
-            success, rvec, tvec = cv2.solvePnP(
+            # 檢查追蹤結果是否合理 (Z值不可突然變得太大，容許邊緣些微的正數，但避免漸進式翻轉)
+            if success_track:
+                R_track, _ = cv2.Rodrigues(rvec_track)
+                if R_track[2, 2] < 0.3: 
+                    success = True
+                    rvec = rvec_track
+                    tvec = tvec_track
+
+        # 2. 如果追蹤失敗，或剛開機，啟用「雙解評估」找出最合理的姿態
+        if not success:
+            # solvePnPGeneric 會同時回傳正向解與反向解
+            success_gen, rvecs, tvecs, _ = cv2.solvePnPGeneric(
                 self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
                 flags=cv2.SOLVEPNP_IPPE_SQUARE
             )
-        
+            
+            if success_gen and len(rvecs) > 0:
+                best_idx = 0
+                if len(rvecs) > 1:
+                    # 🌟 核心魔法：比較兩個解的 Z 軸法向量，選擇數值「最小(最負)」的那一個
+                    # 這代表動態選擇「最平行於相機感光元件」的姿態，完美解決邊緣透視翻轉！
+                    z_val_0 = cv2.Rodrigues(rvecs[0])[0][2, 2]
+                    z_val_1 = cv2.Rodrigues(rvecs[1])[0][2, 2]
+                    
+                    if z_val_1 < z_val_0:
+                        best_idx = 1
+                        
+                rvec = rvecs[best_idx]
+                tvec = tvecs[best_idx]
+                success = True
+
         if success:
-            # 🌟 成功算出姿態後，立刻更新記憶，給下一幀使用
+            # 成功算出姿態後，立刻更新記憶給下一幀
             self.last_rvec = rvec
             self.last_tvec = tvec
             
             F = ROBOT_3D_FRONT
             B = -ROBOT_3D_BACK
-            R, _ = cv2.Rodrigues(rvec)
-            if R[2, 2] > 0:  # 如果標籤的 Z 軸指向了遠離相機的方向 (穿透牆壁)
-                success = False # 判定為無效的「反向解」，直接拒絕！
-        
-        if success:
-            F = ROBOT_3D_FRONT
-            B = -ROBOT_3D_BACK
             L = -ROBOT_3D_LEFT
             R = ROBOT_3D_RIGHT
             
-            # 在 OpenCV 中，負 Z 軸通常指向相機 (高度往上長)
             Top = -ROBOT_3D_TOP 
             Bot = ROBOT_3D_BOTTOM
             
-            # 2. 定義車體 3D 長方體的 8 個頂點
-            # (前左上, 前右上, 後右上, 後左上, 前左下, 前右下, 後右下, 後左下)
+            # 定義車體 3D 長方體的 8 個頂點
             box_3d = np.array([
                 [L, F, Top], [R, F, Top], [R, B, Top], [L, B, Top],
                 [L, F, Bot], [R, F, Bot], [R, B, Bot], [L, B, Bot]
             ], dtype=np.float32)
             
-            # 3. 將 8 個 3D 頂點投影回 2D 畫面
+            # 將 8 個 3D 頂點投影回 2D 畫面
             projected_pts, _ = cv2.projectPoints(box_3d, rvec, tvec, self.cam_matrix, self.dist_coeffs)
             projected_pts = projected_pts.reshape(-1, 2).astype(np.int32)
             
             self.box_3d_pts = projected_pts
 
-            # 4. 取這些投影點的「凸包 (Convex Hull)」作為最終的 2D 遮罩多邊形
+            # 取這些投影點的「凸包 (Convex Hull)」作為最終的 2D 遮罩多邊形
             hull = cv2.convexHull(projected_pts)
             self.mask_polygon = hull.reshape(-1, 2)
         else:
             self.mask_polygon = None
-            self.box_3d_pts = None 
+            self.box_3d_pts = None
+            self.last_rvec = None
+            self.last_tvec = None
 
     def update_target(self, target_x, target_y):
         self.has_target = True
