@@ -1,69 +1,77 @@
 # planner.py
 import math
-from config.robot_settings import MAX_RESETS
 
 class CleaningPlanner:
     def __init__(self, res_scale=1.0):
+        self.res_scale = res_scale
         self.current_target = None 
-        self.blacklist = []           
-        self.blacklist_radius = int(15 * res_scale)
-        self.reset_count = 0   
+        self.task_queue = []
+        self.reset_count = 0
+
+        # 動態讀取設定檔，建立網格大小
+        try:
+            from config.robot_settings import ERASER_SWATH_WIDTH
+            self.step_size = int(ERASER_SWATH_WIDTH * res_scale)
+        except ImportError:
+            self.step_size = int(40 * res_scale)
 
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def mark_as_visited(self, x, y):
-        self.blacklist.append((x, y))
-        print(f"[Planner] Blacklist added: ({x}, {y})")
+    def generate_task_queue(self, dirty_list, start_x, start_y):
+        """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
+        self.current_target = None
+        self.task_queue.clear()
+        
+        raw_points = []
+        for dirty in dirty_list:
+            x, y, w, h = dirty['x'], dirty['y'], dirty['w'], dirty['h']
+            
+            # 如果髒污範圍比板擦還小，直接取幾何中心
+            if w <= self.step_size and h <= self.step_size:
+                raw_points.append((dirty['cx'], dirty['cy']))
+            else:
+                # 網格化降維打擊：將大面積切碎成多個走訪點
+                for px in range(x + self.step_size//2, x + w, self.step_size):
+                    for py in range(y + self.step_size//2, y + h, self.step_size):
+                        raw_points.append((px, py))
 
-    def plan_next_target(self, dirty_list, robot_x, robot_y):
+        if not raw_points:
+            return False
+
+        # 貪婪演算法 (Greedy Nearest Neighbor) 路徑最佳化
+        curr_x, curr_y = start_x, start_y
+        while raw_points:
+            best_idx = 0
+            min_dist = float('inf')
+            for i, pt in enumerate(raw_points):
+                dist = self._calculate_distance(curr_x, curr_y, pt[0], pt[1])
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = i
+            
+            # 拔出離現在最近的點，塞進工作排程
+            next_target = raw_points.pop(best_idx)
+            self.task_queue.append(next_target)
+            curr_x, curr_y = next_target[0], next_target[1]
+
+        print(f"[Planner] 任務快照已建立！共產出 {len(self.task_queue)} 個網格點，路徑已最佳化。")
+        return True
+
+    def get_current_target(self):
+        """從佇列中依序領取任務"""
         if self.current_target is not None:
             return self.current_target
+        
+        if self.task_queue:
+            self.current_target = self.task_queue.pop(0)
+            return self.current_target
+        
+        return None
 
-        # 如果沒有鎖定目標，才張開眼睛看視覺給的 dirty_list 來重新規劃
-        if not dirty_list or robot_x is None or robot_y is None:
-            self.current_target = None
-            self.reset_count = 0
-            return None
-
-        # ── 以下為原本的尋找最近目標邏輯 ──
-        valid_targets = []
-        for dirty in dirty_list:
-            cx, cy = dirty['cx'], dirty['cy']
-            is_blacklisted = False
-            
-            for bx, by in self.blacklist:
-                if self._calculate_distance(cx, cy, bx, by) < self.blacklist_radius:
-                    is_blacklisted = True
-                    break
-            
-            if not is_blacklisted:
-                valid_targets.append(dirty)
-
-        if not valid_targets and len(dirty_list) > 0:
-            if self.reset_count < MAX_RESETS:
-                print(f"[Planner] Blacklist reset. (Retry: {self.reset_count + 1}/{MAX_RESETS})")
-                self.blacklist.clear()
-                self.reset_count += 1
-                return None
-            else:
-                print("[Planner] 達重試上限，放棄頑固污漬！")
-                return None
-
-        closest_target = None
-        min_distance = float('inf')
-
-        for target in valid_targets:
-            cx, cy = target['cx'], target['cy']
-            # 注意：這裡傳進來的 robot_x, robot_y 已經是 main.py 算好的「板擦座標」
-            dist = self._calculate_distance(robot_x, robot_y, cx, cy)
-            
-            if dist < min_distance:
-                min_distance = dist
-                closest_target = (cx, cy)
-
-        self.current_target = closest_target
-        return self.current_target
+    def mark_target_reached(self):
+        """呼叫此方法代表抵達目標，將當前目標清空，下次呼叫 get_current_target 就會拿新的"""
+        self.current_target = None
 
     def get_relative_movement(self, robot_x, robot_y, robot_angle, target_x, target_y):
         pixel_dist = self._calculate_distance(robot_x, robot_y, target_x, target_y)

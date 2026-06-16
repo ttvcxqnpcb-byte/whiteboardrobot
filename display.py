@@ -16,11 +16,24 @@ class Visualizer:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.circle(frame, (tx, ty), 3, (0, 0, 255), -1)
 
-        for bx, by in planner.blacklist:
-            cv2.circle(frame, (bx, by), planner.blacklist_radius, (100, 100, 100), 2)
-            cv2.putText(frame, "Visited", (bx - 20, by - planner.blacklist_radius - 5), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 100, 100), 1)
+        if planner.task_queue or planner.current_target:
+            pts = []
+            if planner.current_target:
+                pts.append(planner.current_target)
+            pts.extend(planner.task_queue)
+            
+            # 從車頭連一條線到第一個目標點
+            if robot.x is not None and robot.y is not None and len(pts) > 0:
+                cv2.line(frame, (robot.x, robot.y), pts[0], (0, 255, 255), 2)
 
+            # 將序列中的任務點用線連起來，並畫出網格點
+            for i in range(len(pts) - 1):
+                cv2.line(frame, pts[i], pts[i+1], (255, 100, 100), 2)
+                cv2.circle(frame, pts[i], 4, (255, 200, 0), -1)
+            
+            if len(pts) > 0:
+                cv2.circle(frame, pts[-1], 4, (255, 200, 0), -1)
+                
         if planner.current_target and robot.x is not None and robot.y is not None:
             tx, ty = planner.current_target
             cv2.line(frame, (robot.x, robot.y), (tx, ty), (0, 255, 255), 2)

@@ -29,7 +29,9 @@ class BaseMode(ABC):
 class FullControlMode(BaseMode):
     def __init__(self, shared_context):
         super().__init__(shared_context)
-        self.is_cleaning = False
+        # 🌟 狀態機：IDLE (待機), CLEANING (擦拭中), RETURNING (回家中), VERIFYING (二階段複檢)
+        self.state = "IDLE" 
+        
         self.last_cmd = None
         self.last_send_time = 0
         self.eraser_on = False
@@ -45,15 +47,15 @@ class FullControlMode(BaseMode):
         self.ack_start_angle = None
 
         self.home_pos = None
-        self.is_returning_home = False
-
+        self.verify_timer = 0
         self.cached_roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
-
+        
+        # 🌟 目標攻堅看門狗
         self.target_start_time = 0
         self.current_target_cache = None
 
     def activate(self):
-        print("\n📡 [Mode 0] 切換至全自動控制模式 (藍牙自動連線已啟動)")
+        print("\n📡 [Mode 0] 切換至全自動快照任務模式 (藍牙自動連線已啟動)")
         if self.ctx.get('bt'):
             self.ctx['bt'].enable_auto_connect()
 
@@ -66,83 +68,85 @@ class FullControlMode(BaseMode):
             self.ctx['robot'].update_state(robot_center, robot_corners)
             robot_mask_pts = self.ctx['robot'].get_mask_polygon()
 
+        # 這裡依然每幀辨識，但不再即時干擾清潔規劃
         ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
         dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
-
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
-        if self.is_cleaning:
+        if self.state != "IDLE":
             if robot_center is None:
                 self.lost_frames_count += 1
                 if self.lost_frames_count >= self.MAX_LOST_FRAMES:
-                    if self.ctx.get('bt') : 
-                        if self.last_cmd == "F":
-                            rescue_cmd = "B" 
-                            print("⚠️ 警告：丟失標籤！判斷為過衝，嘗試盲退自救！")
-                        else:
-                            rescue_cmd = "S" 
-                            print("⚠️ 警告：丟失標籤！啟動緊急停止！")
-                            
+                    if self.ctx.get('bt'): 
+                        rescue_cmd = "B" if self.last_cmd == "F" else "S"
                         if self.last_cmd != rescue_cmd:
                             self.ctx['bt'].send_new_action(rescue_cmd)
                             self.last_cmd = rescue_cmd
                             self.last_send_time = time.time()
                             self.retry_count = 0
-
                     self.lost_frames_count = self.MAX_LOST_FRAMES 
             else:
                 self.lost_frames_count = 0
-                
-                # 🌟 視覺代償邏輯 (判斷車子是否已經真的在動了)
                 current_scale = self.ctx.get('res_scale', 1.0)
+                
+                # 視覺代償邏輯
                 if self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked and self.ack_start_pos is not None:
                     dist = np.hypot(self.ctx['robot'].x - self.ack_start_pos[0], self.ctx['robot'].y - self.ack_start_pos[1])
                     delta_ang = abs(self.ctx['robot'].angle - self.ack_start_angle)
                     if delta_ang > 180: delta_ang = 360 - delta_ang
-                    
-                    # 若移動超過 10px 或旋轉超過 5度，視為指令已被成功執行
                     if dist > (VISUAL_COMP_DIST_BASE * current_scale) or delta_ang > VISUAL_COMP_ANGLE:
-                        print(f"👀 [視覺代償] 偵測到車體已作動，強制放行重傳指令: {self.last_cmd}")
                         self.ctx['bt'].is_cmd_acked = True
                         self.ack_start_pos = None
 
-                dirty_list = self.ctx['whiteboard'].get_dirty_list()
-                
-                if self.is_returning_home:
-                    target = self.home_pos # 如果在復位模式，死命盯著起點走就好
-                else:
-                    target = self.ctx['planner'].plan_next_target(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
-                    # 如果字跡擦完了，且有起點紀錄，無縫切換到自動復位模式
-                    if target is None and self.home_pos is not None:
-                        print("🎉 全部的擦拭結束！啟動自動復位，準備回家...")
-                        self.is_returning_home = True
+                # 🌟 狀態機核心邏輯
+                target = None
+                if self.state == "VERIFYING":
+                    # 睜開眼睛等待視線穩定 2 秒
+                    if time.time() - self.verify_timer > 2.0:
+                        dirty_list = self.ctx['whiteboard'].get_dirty_list()
+                        if self.ctx['planner'].reset_count < MAX_RESETS:
+                            has_tasks = self.ctx['planner'].generate_task_queue(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
+                            if has_tasks:
+                                self.ctx['planner'].reset_count += 1
+                                print(f"👀 [二階段複檢] 發現殘留髒污！啟動第 {self.ctx['planner'].reset_count} 波補刀攻堅！")
+                                self.state = "CLEANING"
+                            else:
+                                print("🎉 [二階段複檢] 完美通過！白板已經完全乾淨，任務結束！")
+                                self.state = "IDLE"
+                        else:
+                            print("🚨 達到最大重試次數，放棄頑固污漬，強制下班！")
+                            self.state = "IDLE"
+                            
+                elif self.state == "RETURNING":
+                    target = self.home_pos
+                    
+                elif self.state == "CLEANING":
+                    target = self.ctx['planner'].get_current_target()
+                    if target is None:
+                        print("🏁 清單走訪完畢！準備退回基地進行複檢...")
+                        self.state = "RETURNING"
                         target = self.home_pos
 
-                # 🌟🌟🌟 【新增】目標攻堅看門狗邏輯 (Target Watchdog) 🌟🌟🌟
-                if target is not None and not self.is_returning_home:
+                # 🌟 目標攻堅看門狗 (Watchdog)
+                if self.state == "CLEANING" and target is not None:
                     if target != self.current_target_cache:
-                        # 換了新目標，重新計時
                         self.current_target_cache = target
                         self.target_start_time = time.time()
                     elif time.time() - self.target_start_time > WATCHDOG_TIMEOUT:
-                        print(f"🚨 [看門狗] 攻堅目標 {target} 超時 ({WATCHDOG_TIMEOUT}s)！強制放棄並倒車脫困！")
-                        # 將目標打入黑名單
-                        self.ctx['planner'].mark_as_visited(target[0], target[1])
-                        self.ctx['planner'].current_target = None
+                        print(f"🚨 [看門狗] 攻堅目標 {target} 超時 ({WATCHDOG_TIMEOUT}s)！直接放棄該網格點，倒車脫困！")
+                        self.ctx['planner'].mark_target_reached()
                         self.current_target_cache = None
-                        target = None # 把這幀的 target 清空
-                        
-                        # 覆寫為強制倒車指令
+                        target = None
                         if self.ctx.get('bt'):
                             self.ctx['bt'].send_new_action("B")
                             self.last_cmd = "B"
                             self.last_send_time = time.time()
                             self.retry_count = 0
-                        return # 提早結束這幀，下一幀重新尋找目標
+                        return # 提早結束這幀，先退後再說
                 elif target is None:
                     self.current_target_cache = None
 
-                    
+                # 確認指令 ACK
                 if self.ctx.get('bt'):
                     if self.ctx['bt'].is_cmd_acked:
                         if self.last_cmd == "P": self.eraser_on = True
@@ -152,79 +156,65 @@ class FullControlMode(BaseMode):
                         self.last_cmd = None  
                         self.ctx['bt'].is_action_finished = False
                     
-                    pixel_dist = 0.0
-                    target_abs_angle = 0.0
-                    delta_angle = 0.0
+                    pixel_dist, target_abs_angle, delta_angle = 0.0, 0.0, 0.0
                     if target is not None:
-                        # 🌟 角度計算：永遠以 ArUco 中點 (旋轉軸心) 當作方向基準
                         delta_angle, _, target_abs_angle = self.ctx['planner'].get_relative_movement(
                             self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y, self.ctx['robot'].angle, target[0], target[1]
                         )
-                        
-                        # 🌟 距離計算：依據任務不同，切換實體參考點
-                        if self.is_returning_home:
-                            # 回家了沒 -> 用 ArUco 中點當距離依據
+                        if self.state == "RETURNING":
                             pixel_dist = np.hypot(self.ctx['robot'].aruco_x - target[0], self.ctx['robot'].aruco_y - target[1])
                         else:
-                            # 擦字跡到了沒 -> 用板擦中點 (robot.x, robot.y) 當距離依據
                             pixel_dist = np.hypot(self.ctx['robot'].x - target[0], self.ctx['robot'].y - target[1])
 
-                    # 🌟 修改：馬達控制訊號與抵達判定
-                    if self.is_cleaning and target is not None and not self.eraser_on and not self.is_returning_home:
-                        new_cmd = "P"  # 清潔時開馬達
-                    elif (not self.is_cleaning or target is None or self.is_returning_home) and self.eraser_on:
-                        new_cmd = "Y"  # 只要準備回家，或者結束了，二話不說先關馬達
+                    # 產生新指令
+                    if self.state == "CLEANING" and target is not None and not self.eraser_on:
+                        new_cmd = "P"
+                    elif self.state in ["RETURNING", "VERIFYING", "IDLE"] and self.eraser_on:
+                        new_cmd = "Y"
                     else:
                         if target is not None:
                             if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale): 
-                                if self.is_returning_home:
+                                if self.state == "RETURNING":
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
                                     if angle_diff > 180: angle_diff -= 360
                                     elif angle_diff < -180: angle_diff += 360
-
+                                    
                                     if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
                                         direction = "R" if angle_diff > 0 else "L"
-                                        new_cmd = f"{direction}{self.home_angle:.1f}" #絕對角度
+                                        new_cmd = f"{direction}{self.home_angle:.1f}"
                                         print(f"🔄 [姿態校正] 已達原點，原地轉正車頭中: {new_cmd}")
                                     else:
-                                        print("🏠 [自動復位成功] 已安全回到基地且車頭對齊！(基地座標將持續保留)")
+                                        print("🏠 [自動復位成功] 已安全退回基地！啟動視覺複檢程序...")
                                         new_cmd = "S"
-                                        self.is_cleaning = False
-                                        self.is_returning_home = False
+                                        self.state = "VERIFYING"
+                                        self.verify_timer = time.time()
                                 else:
                                     new_cmd = "S"
-                                    self.ctx['planner'].mark_as_visited(target[0], target[1])
-                                    self.ctx['planner'].current_target = None
+                                    self.ctx['planner'].mark_target_reached() # 抵達網格點，請求拔除
                             elif abs(delta_angle) > BACKWARD_ANGLE_THRESH:
                                 new_cmd = "B"
                             elif abs(delta_angle) > TURN_ANGLE_THRESH:
                                 direction = "R" if delta_angle > 0 else "L"
-                                new_cmd = f"{direction}{target_abs_angle:.1f}" #絕對角度
+                                new_cmd = f"{direction}{target_abs_angle:.1f}"
                             else:
                                 new_cmd = "F"
                         else:
                             new_cmd = "S"
 
+                    # 防撞智能圍籬
                     if target is not None:
-                        # 將 ROI 轉為 numpy array 以便計算
                         dist_front = cv2.pointPolygonTest(self.cached_roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
                         dist_back = cv2.pointPolygonTest(self.cached_roi_array, (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y), True)
-                        
-                        # 使用設定檔中抽離的安全距離參數
                         safe_margin = int(SAFE_MARGIN_BASE * current_scale)
-                        
-                        # 2. 只要車頭或車尾任一端進入危險區域，就觸發智能防護
                         if (0 <= dist_front < safe_margin) or (0 <= dist_back < safe_margin):
-                            # 3. 判斷相對姿態：誰比較靠近牆壁？
                             if dist_front < dist_back:
-                                # 車頭離牆近 -> 面向牆壁，強制倒車騰出空間！
-                                print(f"🛑 [智能圍籬] 車頭面壁 (距牆 {dist_front:.1f}px)，強制倒車迴避！")
+                                print(f"🛑 [智能圍籬] 車頭面壁，強制倒車迴避！")
                                 new_cmd = "B"
                             else:
-                                # 車尾離牆近 -> 屁股靠牆，強制往前脫離！
-                                print(f"🛑 [智能圍籬] 車尾靠牆 (距牆 {dist_back:.1f}px)，強制前進脫離！")
+                                print(f"🛑 [智能圍籬] 車尾靠牆，強制前進脫離！")
                                 new_cmd = "F"
 
+                    # 發送指令機制 (包含 Cooldown 重試)
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
                     last_base_cmd = self.last_cmd[0] if self.last_cmd else None
@@ -232,14 +222,10 @@ class FullControlMode(BaseMode):
                     if new_base_cmd != last_base_cmd:
                         if target is not None:
                             print(f"📤 切換動作: {new_cmd} (距離: {pixel_dist:.1f}, 目標絕對角: {target_abs_angle:.1f})")
-                        else:
-                            print(f"🎉 擦拭完畢 (無殘留字跡)！發送停止指令: {new_cmd}")
-                            
                         self.ctx['bt'].send_new_action(new_cmd)
                         self.last_cmd = new_cmd
                         self.last_send_time = current_time
                         self.retry_count = 0
-                        # 🌟 紀錄送出指令當下的姿態
                         self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
                         self.ack_start_angle = self.ctx['robot'].angle
                     else:
@@ -247,53 +233,37 @@ class FullControlMode(BaseMode):
                             if not self.ctx['bt'].is_cmd_acked:
                                 if self.retry_count < self.MAX_RETRIES:
                                     self.retry_count += 1
-                                    print(f"⚠️ 未收到格式確認，強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
+                                    print(f"⚠️ 強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
                                     self.ctx['bt'].resend_action()
                                     self.last_send_time = current_time
                                 else:
-                                    print(f"❌ 放棄重試指令: {self.last_cmd}，強制放行。")
                                     self.ctx['bt'].is_cmd_acked = True
                             else:
                                 if new_cmd != self.last_cmd:
-                                    print(f"🔄 更新角度: {new_cmd}")
                                     self.ctx['bt'].send_new_action(new_cmd)
                                     self.last_cmd = new_cmd
                                     self.last_send_time = current_time
                                     self.retry_count = 0
-                                    # 🌟 更新姿態紀錄
                                     self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
                                     self.ack_start_angle = self.ctx['robot'].angle
                                 else:
-                                    # 🌟🌟🌟 新增：超時看門狗 (Timeout Watchdog) 🌟🌟🌟
                                     if current_time - self.last_send_time > 3.0:
-                                        print(f" [看門狗觸發] 等待指令 {self.last_cmd} 的 finish 封包超時！強制清空狀態以打破死鎖！")
-                                        self.last_cmd = None  # 關鍵：清空最後指令，強迫下一幀重新評估並發送新指令！
-        else:
-            self.ctx['planner'].current_target = None
+                                        print(f" [藍牙看門狗] 等待指令 finish 超時！清空狀態。")
+                                        self.last_cmd = None  
 
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         
         is_bt_connected = self.ctx.get('bt') and self.ctx['bt'].is_connected
         bt_status = "Connected" if is_bt_connected else "DISCONNECTED"
         bt_color = (0, 255, 0) if is_bt_connected else (0, 0, 255)
-        state_str = "Running" if self.is_cleaning else "Standby"
-        cv2.putText(hud_frame, f"MODE 0: AUTO ({state_str}) | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
+        cv2.putText(hud_frame, f"MODE 0: AUTO ({self.state}) | BT: {bt_status}", (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bt_color, 2)
         
         if robot_mask_pts is not None:
-        # 🌟 畫出 3D 立體透視框骨架 (Wireframe Debug)
             box_pts = getattr(self.ctx['robot'], 'box_3d_pts', None)
             if box_pts is not None and len(box_pts) == 8:
-            # 8 個頂點的連線關係 (Top:0-3, Bottom:4-7, Pillars:0-4,1-5...)
-                edges = [
-                    (0,1), (1,2), (2,3), (3,0), # 車頂四邊形
-                    (4,5), (5,6), (6,7), (7,4), # 車底四邊形
-                    (0,4), (1,5), (2,6), (3,7)  # 四根柱子
-                ]
+                edges = [(0,1), (1,2), (2,3), (3,0), (4,5), (5,6), (6,7), (7,4), (0,4), (1,5), (2,6), (3,7)]
                 for start, end in edges:
-                    pt1 = tuple(box_pts[start])
-                    pt2 = tuple(box_pts[end])
-                    cv2.line(hud_frame, pt1, pt2, (0, 255, 255), 2) # 用黃色線條畫出
-        
+                    cv2.line(hud_frame, tuple(box_pts[start]), tuple(box_pts[end]), (0, 255, 255), 2) 
             cv2.polylines(hud_frame, [np.array(robot_mask_pts, dtype=np.int32)], True, (255, 0, 255), 2)
         
         self.ctx['visualizer'].show_windows(hud_frame, aruco_mask, ink_mask)
@@ -301,33 +271,33 @@ class FullControlMode(BaseMode):
     def handle_key(self, key):
         if key == ord('h'):
             if self.ctx['robot'].x is not None:
-                # 🌟 改用 ArUco 座標當作基地位置
                 self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
                 self.home_angle = self.ctx['robot'].angle
-                print(f"\n🏠 [熱鍵設定] 更新復位基地(ArUco軸心)為: {self.home_pos}, 角度: {self.home_angle:.1f}°")
-            else:
-                print("\n❌ [錯誤] 畫面上找不到車子標籤，無法設定起點！請確保車子在視線內。")
+                print(f"\n🏠 [熱鍵設定] 更新復位基地為: {self.home_pos}")
                 
         elif key == ord('s'):
             if self.ctx['robot'].x is not None:
-                print("\n▶️ [Mode 0] 開始自動擦拭")
-                
+                print("\n▶️ [Mode 0] 拍下快照，建立任務清單！")
                 if getattr(self, 'home_pos', None) is None:
-                    # 🌟 自動記錄時也用 ArUco 座標
                     self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
                     self.home_angle = self.ctx['robot'].angle
-                    print(f"📍 [自動紀錄] 建立專屬基地位置: {self.home_pos}, 角度: {self.home_angle:.1f}°")
+                    print(f"📍 [自動紀錄] 建立專屬基地位置: {self.home_pos}")
+                
+                # 瞬間快照並建立 Queue
+                dirty_list = self.ctx['whiteboard'].get_dirty_list()
+                has_tasks = self.ctx['planner'].generate_task_queue(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
+                
+                if has_tasks:
+                    self.ctx['planner'].reset_count = 0
+                    self.state = "CLEANING"
                 else:
-                    print(f"📍 [保留設定] 任務結束將回到專屬基地: {self.home_pos}, 角度: {self.home_angle:.1f}°")
-                    
-                self.is_returning_home = False
-                self.is_cleaning = True
+                    print("✨ 畫面很乾淨，不需要擦拭！")
             else:
-                print("\n❌ [錯誤] 尚未辨識到車體標籤，請確保 ArUco 在畫面中再啟動！")
+                print("\n❌ [錯誤] 尚未辨識到車體標籤！")
 
         elif key == ord('p'):
             print("\n⏸️ [Mode 0] 暫停待機")
-            self.is_cleaning = False
+            self.state = "IDLE"
             if self.ctx.get('bt'): self.ctx['bt'].send_new_action("S")
         elif key == ord('z'):
             if self.ctx.get('bt'): self.ctx['bt'].send_new_action("Z")
@@ -335,7 +305,6 @@ class FullControlMode(BaseMode):
             if self.ctx.get('bt'): self.ctx['bt'].send_new_action("P")
         elif key == ord('q'):
             if self.ctx.get('bt'): self.ctx['bt'].send_new_action("Y")
-
 # ==========================================
 #  3. Mode 1: 純視覺除錯模式 (Pure Vision Debug Mode)
 # ==========================================
