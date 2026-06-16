@@ -179,19 +179,25 @@ class FullControlMode(BaseMode):
                     if target is not None:
                         # 將 ROI 轉為 numpy array 以便計算
                         roi_array = np.array(self.ctx['roi_polygon'], dtype=np.int32)
-                        # 計算車子中心與邊界的最短距離
-                        dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
                         
+                        # 1. 分別測量「車頭 (板擦中心)」與「車尾 (ArUco 旋轉軸心)」距離牆壁的最短距離
+                        dist_front = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
+                        dist_back = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y), True)
+                        
+                        # 使用設定檔中抽離的安全距離參數
                         safe_margin = int(SAFE_MARGIN_BASE * current_scale)
-                        # 如果距離邊界太近 (大於 0 代表在內側，但小於安全距離)
-                        if 0 <= dist_to_edge < safe_margin:
-                            print(f"🛑 [電子圍籬觸發] 距離邊界僅 {dist_to_edge:.1f}px，緊急迴避！")
-                            # 如果本來想前進，強制改成後退
-                            if new_cmd == "F":
+                        
+                        # 2. 只要車頭或車尾任一端進入危險區域，就觸發智能防護
+                        if (0 <= dist_front < safe_margin) or (0 <= dist_back < safe_margin):
+                            # 3. 判斷相對姿態：誰比較靠近牆壁？
+                            if dist_front < dist_back:
+                                # 車頭離牆近 -> 面向牆壁，強制倒車騰出空間！
+                                print(f"🛑 [智能圍籬] 車頭面壁 (距牆 {dist_front:.1f}px)，強制倒車迴避！")
                                 new_cmd = "B"
-                            # 如果是其他的，強制煞車
-                            elif new_cmd != "B":
-                                new_cmd = "S"
+                            else:
+                                # 車尾離牆近 -> 屁股靠牆，強制往前脫離！
+                                print(f"🛑 [智能圍籬] 車尾靠牆 (距牆 {dist_back:.1f}px)，強制前進脫離！")
+                                new_cmd = "F"
 
                     current_time = time.time()
                     new_base_cmd = new_cmd[0]
