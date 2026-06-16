@@ -18,10 +18,22 @@ class CleaningPlanner:
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def generate_task_queue(self, dirty_list, start_x, start_y):
+    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None):
         """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
         self.current_target = None
         self.task_queue.clear()
+        
+        try:
+            from config.robot_settings import ERASER_ARUCO_RATIO
+            ratio = ERASER_ARUCO_RATIO
+        except ImportError:
+            ratio = 1.5
+
+        if current_marker_length is not None and current_marker_length > 0:
+            self.step_size = int(current_marker_length * ratio)
+            print(f"[Planner] 根據標籤大小 ({current_marker_length:.1f}px) 動態設定網格間距為: {self.step_size}px")
+        else:
+            self.step_size = int(40 * self.res_scale)
         
         raw_points = []
         for dirty in dirty_list:

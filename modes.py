@@ -283,9 +283,13 @@ class FullControlMode(BaseMode):
                     self.home_angle = self.ctx['robot'].angle
                     print(f"📍 [自動紀錄] 建立專屬基地位置: {self.home_pos}")
                 
-                # 瞬間快照並建立 Queue
                 dirty_list = self.ctx['whiteboard'].get_dirty_list()
-                has_tasks = self.ctx['planner'].generate_task_queue(dirty_list, self.ctx['robot'].x, self.ctx['robot'].y)
+                
+                # 🌟 取得當下的標籤像素大小並傳入
+                marker_length = getattr(self.ctx['robot'], 'marker_pixel_length', None)
+                has_tasks = self.ctx['planner'].generate_task_queue(
+                    dirty_list, self.ctx['robot'].x, self.ctx['robot'].y, marker_length
+                )
                 
                 if has_tasks:
                     self.ctx['planner'].reset_count = 0

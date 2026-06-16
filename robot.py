@@ -65,6 +65,8 @@ class Robot:
 
         # --- 將座標基準點移到「板擦中心」 ---
         marker_length = np.hypot(dx, dy)
+
+        self.marker_pixel_length = marker_length
         dir_x = dx / (marker_length + 1e-5)
         dir_y = dy / (marker_length + 1e-5)
         
