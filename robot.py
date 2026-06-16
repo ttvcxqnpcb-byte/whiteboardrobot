@@ -1,8 +1,9 @@
 import numpy as np
+import cv2
 from config.robot_settings import *
 
 class Robot:
-    def __init__(self):
+    def __init__(self, res_scale=1.5): # 預設帶入我們系統的解析度縮放
         self.x = 0          
         self.y = 0          
         self.angle = 0.0    
@@ -15,6 +16,28 @@ class Robot:
         self.target_y = None
 
         self.mask_polygon = None
+
+        # --- 1. 建立偽造的相機內部參數 (Fake Camera Matrix) ---
+        # 假設一般 Webcam 視角約 60 度，焦距 f 大約等於畫面寬度
+        w = 640 * res_scale
+        h = 480 * res_scale
+        focal_length = w 
+        self.cam_matrix = np.array([
+            [focal_length, 0, w/2],
+            [0, focal_length, h/2],
+            [0, 0, 1]
+        ], dtype=np.float32)
+        self.dist_coeffs = np.zeros((4,1)) # 假設無明顯鏡頭畸變
+        
+        # --- 2. 定義標籤的 3D 物理角點 (Z=0 平面) ---
+        s = MARKER_SIZE / 2.0
+        # 順序須與 detection 出來的 corners 順序一致 (左上, 右上, 右下, 左下)
+        self.obj_pts = np.array([
+            [-s,  s, 0],
+            [ s,  s, 0],
+            [ s, -s, 0],
+            [-s, -s, 0]
+        ], dtype=np.float32)
 
     def update_state(self, center, corners):
         if center is None or corners is None:
@@ -32,12 +55,9 @@ class Robot:
         dy = front_y - back_y  
         
         angle_cv = np.degrees(np.arctan2(dy, dx))
-        
         abs_angle = angle_cv + 90
-        
         if abs_angle > 180:
             abs_angle -= 360
-            
         self.angle = abs_angle
 
         # --- 將座標基準點移到「板擦中心」 ---
@@ -46,40 +66,43 @@ class Robot:
         dir_y = dy / (marker_length + 1e-5)
         
         eraser_offset = marker_length * ERASER_OFFSET_RATIO
-        
-        # 覆寫 robot 的主座標為板擦中心
         self.x = int(self.aruco_x + dir_x * eraser_offset)
         self.y = int(self.aruco_y + dir_y * eraser_offset)
 
-        poly_pts = np.array(corners, dtype=np.float32)
-        pt_TL, pt_TR, pt_BR, pt_BL = poly_pts[0], poly_pts[1], poly_pts[2], poly_pts[3]
-        poly_center = np.mean(poly_pts, axis=0)
+        # ==========================================
+        #  🌟 3D 真實空間投影邏輯
+        # ==========================================
+        img_pts = np.array(corners, dtype=np.float32)
         
-        vec_forward = ((pt_TL + pt_TR) / 2.0) - ((pt_BL + pt_BR) / 2.0)
-        marker_length_mask = np.linalg.norm(vec_forward)
-        dir_forward_mask = vec_forward / (marker_length_mask + 1e-5) 
+        # 1. 透過 solvePnP 算出車體在 3D 空間中的旋轉與位移
+        success, rvec, tvec = cv2.solvePnP(self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         
-        vec_right = ((pt_TR + pt_BR) / 2.0) - ((pt_TL + pt_BL) / 2.0)
-        marker_width = np.linalg.norm(vec_right)
-        dir_right_mask = vec_right / (marker_width + 1e-5) 
-        
-        motor_fwd   = marker_length_mask * MASK_MOTOR_FWD   
-        wheel_start = marker_length_mask * MASK_WHEEL_START  
-        body_bwd    = marker_length_mask * MASK_BODY_BWD   
-        
-        narrow_side = marker_width * MASK_NARROW_SIDE     
-        wheel_side  = marker_width * MASK_WHEEL_SIDE   
-        
-        pt1 = poly_center + (dir_forward_mask * motor_fwd)   - (dir_right_mask * narrow_side)
-        pt2 = poly_center + (dir_forward_mask * motor_fwd)   + (dir_right_mask * narrow_side)
-        pt3 = poly_center + (dir_forward_mask * wheel_start) + (dir_right_mask * narrow_side)
-        pt4 = poly_center + (dir_forward_mask * wheel_start) + (dir_right_mask * wheel_side)
-        pt5 = poly_center - (dir_forward_mask * body_bwd)    + (dir_right_mask * wheel_side)
-        pt6 = poly_center - (dir_forward_mask * body_bwd)    - (dir_right_mask * wheel_side)
-        pt7 = poly_center + (dir_forward_mask * wheel_start) - (dir_right_mask * wheel_side)
-        pt8 = poly_center + (dir_forward_mask * wheel_start) - (dir_right_mask * narrow_side)
-        
-        self.mask_polygon = np.array([pt1, pt2, pt3, pt4, pt5, pt6, pt7, pt8], dtype=np.int32)
+        if success:
+            F = ROBOT_3D_FRONT
+            B = -ROBOT_3D_BACK
+            L = -ROBOT_3D_LEFT
+            R = ROBOT_3D_RIGHT
+            
+            # 在 OpenCV 中，負 Z 軸通常指向相機 (高度往上長)
+            Top = -ROBOT_3D_TOP 
+            Bot = ROBOT_3D_BOTTOM
+            
+            # 2. 定義車體 3D 長方體的 8 個頂點
+            # (前左上, 前右上, 後右上, 後左上, 前左下, 前右下, 後右下, 後左下)
+            box_3d = np.array([
+                [L, F, Top], [R, F, Top], [R, B, Top], [L, B, Top],
+                [L, F, Bot], [R, F, Bot], [R, B, Bot], [L, B, Bot]
+            ], dtype=np.float32)
+            
+            # 3. 將 8 個 3D 頂點投影回 2D 畫面
+            projected_pts, _ = cv2.projectPoints(box_3d, rvec, tvec, self.cam_matrix, self.dist_coeffs)
+            projected_pts = projected_pts.reshape(-1, 2).astype(np.int32)
+            
+            # 4. 取這些投影點的「凸包 (Convex Hull)」作為最終的 2D 遮罩多邊形
+            hull = cv2.convexHull(projected_pts)
+            self.mask_polygon = hull.reshape(-1, 2)
+        else:
+            self.mask_polygon = None
 
     def update_target(self, target_x, target_y):
         self.has_target = True
