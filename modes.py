@@ -207,6 +207,17 @@ class FullControlMode(BaseMode):
                             if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_target_reached()
+                                
+                                # 🌟 貪婪吞噬：瞬間消耗掉佇列中所有已經被踩在腳底下的超近目標
+                                arrival_radius = int(ARRIVAL_DIST_BASE * current_scale)
+                                while self.ctx['planner'].task_queue:
+                                    next_pt = self.ctx['planner'].task_queue[0]
+                                    if np.hypot(self.ctx['robot'].x - next_pt[0], self.ctx['robot'].y - next_pt[1]) < arrival_radius:
+                                        self.ctx['planner'].task_queue.pop(0)
+                                        print(f"🧹 [路徑優化] 順便清除腳底下的重疊網格點: {next_pt}")
+                                    else:
+                                        break
+                                        
                             elif force_backward:
                                 new_cmd = "B" # 🌟 觸發盲區倒車
                             elif abs(delta_angle) > TURN_ANGLE_THRESH:
@@ -280,8 +291,14 @@ class FullControlMode(BaseMode):
                             pass
 
                     # 2. 藍牙防洪閘門 (Un-ACKed Block)
-                    if self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked and not is_override:
-                        new_cmd = self.last_cmd
+                    is_blocked_by_ack = self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked and not is_override
+                    if is_blocked_by_ack:
+                        if current_time - self.last_send_time < 2.0:
+                            new_cmd = self.last_cmd
+                        else:
+                            # 🌟 超時解鎖：如果等 ACK 已經超過 2 秒，強制破除死結放行新指令
+                            print("⚠️ [防洪閘門] 等待 ACK 超時 (2s)，強制解鎖放行新指令！")
+                            self.ctx['bt'].is_cmd_acked = True
 
                     # 3. 0.4秒絕對狀態鎖 (Time Lock)
                     if not is_override and self.last_cmd is not None and current_time < getattr(self, 'cmd_lock_expiry', 0):
@@ -314,7 +331,6 @@ class FullControlMode(BaseMode):
                                     self.ctx['bt'].is_cmd_acked = True
                             else:
                                 if current_time - self.last_send_time > 3.0:
-                                    # ❌ 拔除看門狗的 self.last_cmd = None，只重設計時器避免洗版
                                     self.last_send_time = current_time
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         
