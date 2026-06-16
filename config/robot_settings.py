@@ -19,7 +19,7 @@ ROBOT_3D_BOTTOM = 0.1
 # 安全邊界距離 (以原始解析度為基準，會乘上 RES_SCALE)
 SAFE_MARGIN_BASE = 15
 # 抵達目標的距離寬容值
-ARRIVAL_DIST_BASE = 20
+ARRIVAL_DIST_BASE = 15
 # 回到基地時，判定車頭對齊的容許角度誤差
 HOME_ANGLE_TOLERANCE = 10
 # 判定需要直線後退的觸發角度 (大於此角度才後退)
@@ -47,7 +47,7 @@ VISUAL_COMP_ANGLE = 5.
 #   (Planner & Grid)
 # ==========================
 # 板擦有效覆蓋寬度 (px)，用於將大塊髒污網格化切碎
-ERASER_ARUCO_RATIO = 1.5
+ERASER_ARUCO_RATIO = 0.5
 # 頑固污漬重試次數上限 (二階段複檢的補刀次數)
 MAX_RESETS = 2
 # 目標攻堅超時時間 - 秒 (解決幽靈目標卡死)
