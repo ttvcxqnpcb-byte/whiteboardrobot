@@ -54,6 +54,8 @@ class FullControlMode(BaseMode):
         self.current_target_cache = None
 
         self.cmd_lock_expiry = 0
+        self.verify_timer = 0
+        self.is_aligning_home = False
 
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動快照任務模式 (藍牙自動連線已啟動)")
@@ -217,7 +219,13 @@ class FullControlMode(BaseMode):
                             new_cmd = "Y"  
                         else:
                             if self.state == "RETURNING" and target is not None:
-                                if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                                # 🌟 實作「動態容忍半徑」(Hysteresis)，避免原地轉向時位移導致跳出抵達判定
+                                arrival_radius = int(ARRIVAL_DIST_BASE * current_scale)
+                                if getattr(self, 'is_aligning_home', False):
+                                    arrival_radius = int(ARRIVAL_DIST_BASE * current_scale * 2.5) # 開始對齊後，放寬容忍度 2.5 倍
+
+                                if pixel_dist < arrival_radius:
+                                    self.is_aligning_home = True
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
                                     if angle_diff > 180: angle_diff -= 360
                                     elif angle_diff < -180: angle_diff += 360
@@ -230,13 +238,14 @@ class FullControlMode(BaseMode):
                                         new_cmd = "S"
                                         self.state = "VERIFYING"
                                         self.verify_timer = time.time()
-                                # 復位模式不看板擦死區，直接用原本粗暴角度
-                                elif abs(delta_angle) > BACKWARD_ANGLE_THRESH:
-                                    new_cmd = "B"
+                                        self.is_aligning_home = False
+                                # 🌟 把清潔模式的「優雅迴轉」也套用過來，拔除粗暴的 BACKWARD_ANGLE_THRESH
                                 elif abs(delta_angle) > TURN_ANGLE_THRESH:
+                                    self.is_aligning_home = False
                                     direction = "R" if delta_angle > 0 else "L"
                                     new_cmd = f"{direction}{target_abs_angle:.1f}"
                                 else:
+                                    self.is_aligning_home = False
                                     new_cmd = "F"
                             else:
                                 new_cmd = "S"
