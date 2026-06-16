@@ -17,6 +17,9 @@ class Robot:
 
         self.mask_polygon = None
 
+        self.last_rvec = None
+        self.last_tvec = None
+
         # --- 1. 建立偽造的相機內部參數 (Fake Camera Matrix) ---
         # 假設一般 Webcam 視角約 60 度，焦距 f 大約等於畫面寬度
         w = 640 * res_scale
@@ -75,7 +78,33 @@ class Robot:
         img_pts = np.array(corners, dtype=np.float32)
         
         # 1. 透過 solvePnP 算出車體在 3D 空間中的旋轉與位移
-        success, rvec, tvec = cv2.solvePnP(self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+        img_pts = np.array(corners, dtype=np.float32)
+        
+        # 1. 透過 solvePnP 算出車體在 3D 空間中的旋轉與位移
+        if self.last_rvec is not None and self.last_tvec is not None:
+            # 如果已經有上一幀的正確記憶，開啟 useExtrinsicGuess 強制演算法穩定追蹤，防止 TOP/BOTTOM 翻轉！
+            success, rvec, tvec = cv2.solvePnP(
+                self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
+                rvec=self.last_rvec, tvec=self.last_tvec, 
+                useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE
+            )
+        else:
+            # 如果是程式剛啟動，或是剛剛丟失標籤，就用 IPPE_SQUARE 重新尋找初始姿態
+            success, rvec, tvec = cv2.solvePnP(
+                self.obj_pts, img_pts, self.cam_matrix, self.dist_coeffs, 
+                flags=cv2.SOLVEPNP_IPPE_SQUARE
+            )
+        
+        if success:
+            # 🌟 成功算出姿態後，立刻更新記憶，給下一幀使用
+            self.last_rvec = rvec
+            self.last_tvec = tvec
+            
+            F = ROBOT_3D_FRONT
+            B = -ROBOT_3D_BACK
+            R, _ = cv2.Rodrigues(rvec)
+            if R[2, 2] > 0:  # 如果標籤的 Z 軸指向了遠離相機的方向 (穿透牆壁)
+                success = False # 判定為無效的「反向解」，直接拒絕！
         
         if success:
             F = ROBOT_3D_FRONT
