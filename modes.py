@@ -1,4 +1,4 @@
-# modes.py
+# modes.py elephant
 import cv2
 import time
 from abc import ABC, abstractmethod
@@ -83,11 +83,13 @@ class FullControlMode(BaseMode):
                     if self.ctx.get('bt'): 
                         rescue_cmd = "B" if self.last_cmd == "F" else "S"
                         if self.last_cmd != rescue_cmd:
+                            # 🌟 新增：印出失明警告，抓出幽靈指令！
+                            print(f"🙈 [視覺丟失] 連續 {self.MAX_LOST_FRAMES} 幀找不到標籤！緊急發送: {rescue_cmd}")
                             self.ctx['bt'].send_new_action(rescue_cmd)
                             self.last_cmd = rescue_cmd
                             self.last_send_time = time.time()
                             self.retry_count = 0
-                    self.lost_frames_count = self.MAX_LOST_FRAMES 
+                    self.lost_frames_count = self.MAX_LOST_FRAMES
             else:
                 self.lost_frames_count = 0
                 current_scale = self.ctx.get('res_scale', 1.0)
@@ -320,8 +322,15 @@ class FullControlMode(BaseMode):
                         else:
                             self.cmd_lock_expiry = 0
                     else:
-                        if current_time - self.last_send_time > self.RETRY_COOLDOWN:
-                            if not self.ctx['bt'].is_cmd_acked:
+                        if self.ctx['bt'].is_cmd_acked:
+                            # ✅ [新增] 心跳包機制：
+                            # 已經收到 ACK，但如果是移動指令，每 0.4 秒偷偷重發一次維持馬達動能
+                            if new_cmd[0] in ["F", "L", "R", "B"] and (current_time - self.last_send_time > 0.4):
+                                self.ctx['bt']._send_raw(new_cmd)
+                                self.last_send_time = current_time
+                        else:
+                            # ❌ [原本的邏輯] 尚未 ACK，強硬重發
+                            if current_time - self.last_send_time > self.RETRY_COOLDOWN:
                                 if self.retry_count < self.MAX_RETRIES:
                                     self.retry_count += 1
                                     print(f"⚠️ 強硬重發 ({self.retry_count}/{self.MAX_RETRIES}): {new_cmd}")
@@ -329,9 +338,6 @@ class FullControlMode(BaseMode):
                                     self.last_send_time = current_time
                                 else:
                                     self.ctx['bt'].is_cmd_acked = True
-                            else:
-                                if current_time - self.last_send_time > 3.0:
-                                    self.last_send_time = current_time
         hud_frame = self.ctx['visualizer'].draw_hud(frame, self.ctx['robot'], self.ctx['whiteboard'], self.ctx['planner'], robot_corners, dirty_rects, robot_mask_pts=robot_mask_pts)
         
         is_bt_connected = self.ctx.get('bt') and self.ctx['bt'].is_connected

@@ -107,6 +107,10 @@ class BTInterface:
                         
                 # 2. 🌟 新增：子集合 (Subset) 直接比對！解決 S 與純字串指令卡死問題
                 elif self.pending_cmd in line:
+                    # 🛡️ 專屬防呆：如果指令是 'F'，但字串裡面含有 'OFF'，就不當作是指令 ACK
+                    if self.pending_cmd == 'F' and 'OFF' in line.upper():
+                        continue
+                        
                     self.is_cmd_acked = True
                     print(f"✅ [ACK 子集合確認] 成功驗證指令: {self.pending_cmd}")
                     break
