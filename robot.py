@@ -21,7 +21,7 @@ class Robot:
         # 假設一般 Webcam 視角約 60 度，焦距 f 大約等於畫面寬度
         w = 640 * res_scale
         h = 480 * res_scale
-        focal_length = w  * 2.5
+        focal_length = w * CAMERA_FOCAL_MULTIPLIER
         self.cam_matrix = np.array([
             [focal_length, 0, w/2],
             [0, focal_length, h/2],

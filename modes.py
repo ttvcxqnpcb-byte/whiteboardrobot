@@ -3,6 +3,7 @@ import cv2
 import time
 from abc import ABC, abstractmethod
 import numpy as np
+from config.robot_settings import *
 
 
 # ==========================================
@@ -38,7 +39,7 @@ class FullControlMode(BaseMode):
         self.retry_count = 0
 
         self.lost_frames_count = 0
-        self.MAX_LOST_FRAMES = 5
+        self.MAX_LOST_FRAMES = MAX_LOST_FRAMES
         
         # 🌟 新增：紀錄發送指令當下的實體狀態，用於視覺代償
         self.ack_start_pos = None
@@ -96,7 +97,7 @@ class FullControlMode(BaseMode):
                     if delta_ang > 180: delta_ang = 360 - delta_ang
                     
                     # 若移動超過 10px 或旋轉超過 5度，視為指令已被成功執行
-                    if dist > (10 * current_scale) or delta_ang > 5.0:
+                    if dist > (VISUAL_COMP_DIST_BASE * current_scale) or delta_ang > VISUAL_COMP_ANGLE:
                         print(f"👀 [視覺代償] 偵測到車體已作動，強制放行重傳指令: {self.last_cmd}")
                         self.ctx['bt'].is_cmd_acked = True
                         self.ack_start_pos = None
@@ -146,13 +147,13 @@ class FullControlMode(BaseMode):
                         new_cmd = "Y"  # 只要準備回家，或者結束了，二話不說先關馬達
                     else:
                         if target is not None:
-                            if pixel_dist < int(20 * current_scale):  
+                            if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale): 
                                 if self.is_returning_home:
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
                                     if angle_diff > 180: angle_diff -= 360
                                     elif angle_diff < -180: angle_diff += 360
                                     
-                                    if abs(angle_diff) > 10:
+                                    if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
                                         direction = "R" if angle_diff > 0 else "L"
                                         new_cmd = f"{direction}{self.home_angle:.1f}" #絕對角度
                                         print(f"🔄 [姿態校正] 已達原點，原地轉正車頭中: {new_cmd}")
@@ -165,9 +166,9 @@ class FullControlMode(BaseMode):
                                     new_cmd = "S"
                                     self.ctx['planner'].mark_as_visited(target[0], target[1])
                                     self.ctx['planner'].current_target = None
-                            elif abs(delta_angle) > 165:  
+                            elif abs(delta_angle) > BACKWARD_ANGLE_THRESH:
                                 new_cmd = "B"
-                            elif abs(delta_angle) > 15:
+                            elif abs(delta_angle) > TURN_ANGLE_THRESH:
                                 direction = "R" if delta_angle > 0 else "L"
                                 new_cmd = f"{direction}{target_abs_angle:.1f}" #絕對角度
                             else:
@@ -181,8 +182,7 @@ class FullControlMode(BaseMode):
                         # 計算車子中心與邊界的最短距離
                         dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
                         
-                        safe_margin = int(15 * current_scale) # 安全邊距 (約 35-40 像素)
-                        
+                        safe_margin = int(SAFE_MARGIN_BASE * current_scale)
                         # 如果距離邊界太近 (大於 0 代表在內側，但小於安全距離)
                         if 0 <= dist_to_edge < safe_margin:
                             print(f"🛑 [電子圍籬觸發] 距離邊界僅 {dist_to_edge:.1f}px，緊急迴避！")
@@ -386,7 +386,7 @@ class ManualControlMode(BaseMode):
                 delta_ang = abs(self.ctx['robot'].angle - self.ack_start_angle)
                 if delta_ang > 180: delta_ang = 360 - delta_ang
                 
-                if dist > (10 * current_scale) or delta_ang > 5.0:
+                if dist > (VISUAL_COMP_DIST_BASE * current_scale) or delta_ang > VISUAL_COMP_ANGLE:
                     print(f"👀 [視覺代償] 遙控指令 {self.last_cmd} 已引發實體動作，強制停止重傳！")
                     self.ctx['bt'].is_cmd_acked = True
                     self.ack_start_pos = None
