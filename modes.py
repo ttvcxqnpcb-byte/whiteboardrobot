@@ -315,7 +315,7 @@ class FullControlMode(BaseMode):
                         self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
                         self.ack_start_angle = self.ctx['robot'].angle
                         
-                        if new_cmd[0] in ["F", "L", "R"]:
+                        if new_cmd[0] in ["F", "L", "R", "B"]:
                             self.cmd_lock_expiry = current_time + 0.4
                         else:
                             self.cmd_lock_expiry = 0

@@ -82,7 +82,7 @@ class BTInterface:
             time.sleep(0.05)
 
     def _verify_ack(self, msg_str):
-        """絕對嚴格 ACK 驗證邏輯"""
+        """絕對嚴格與子集合 ACK 驗證邏輯"""
         if self.pending_cmd and not self.is_cmd_acked:
             expected_c = self.pending_cmd[0].upper()
             expected_ang = float(self.pending_cmd[1:]) if len(self.pending_cmd) > 1 else 0.0
@@ -91,6 +91,7 @@ class BTInterface:
             for line in reversed(lines):
                 line = line.strip()
                 
+                # 1. 舊版格式 (Cmd:X,Ang:Y)
                 if "Cmd:" in line and ",Ang:" in line:
                     try:
                         parts = line.split(",")
@@ -104,15 +105,23 @@ class BTInterface:
                     except Exception:
                         continue
                         
-                elif expected_c == 'Z' or ('開始校準' in line or 'y' in line):
+                # 2. 🌟 新增：子集合 (Subset) 直接比對！解決 S 與純字串指令卡死問題
+                elif self.pending_cmd in line:
+                    self.is_cmd_acked = True
+                    print(f"✅ [ACK 子集合確認] 成功驗證指令: {self.pending_cmd}")
+                    break
+
+                # 3. 🌟 修正：邏輯運算子錯誤 (or 改為 and)
+                # 原本的寫法 `expected_c == 'Z' or ...` 會導致只要是預期 'Z'，任何垃圾字串都會讓條件成立而誤判。
+                elif expected_c == 'Z' and ('開始校準' in line or 'y' in line or 'Z' in line):
                     self.is_cmd_acked = True
                     print(f"✅ 陀螺儀校準已觸發！")
                     break
-                elif expected_c == 'P' or 'ExtraMotor: ON' in line:
+                elif expected_c == 'P' and ('ExtraMotor: ON' in line or 'P' in line):
                     self.is_cmd_acked = True
                     print(f"✅ 板擦馬達已啟動！(P)")
                     break
-                elif expected_c == 'Y' or 'ExtraMotor: OFF' in line:
+                elif expected_c == 'Y' and ('ExtraMotor: OFF' in line or 'Y' in line):
                     self.is_cmd_acked = True
                     print(f"✅ 板擦馬達已關閉！(Y)")
                     break
