@@ -167,30 +167,14 @@ class FullControlMode(BaseMode):
                             pixel_dist = np.hypot(self.ctx['robot'].x - target[0], self.ctx['robot'].y - target[1])
 
                     # 產生新指令
-                    if self.state == "CLEANING" and target is not None and not self.eraser_on:
-                        new_cmd = "P"
-                    elif self.state in ["RETURNING", "VERIFYING", "IDLE"] and self.eraser_on:
-                        new_cmd = "Y"
-                    else:
-                        if target is not None:
-                            if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale): 
-                                if self.state == "RETURNING":
-                                    angle_diff = self.home_angle - self.ctx['robot'].angle
-                                    if angle_diff > 180: angle_diff -= 360
-                                    elif angle_diff < -180: angle_diff += 360
-                                    
-                                    if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
-                                        direction = "R" if angle_diff > 0 else "L"
-                                        new_cmd = f"{direction}{self.home_angle:.1f}"
-                                        print(f"🔄 [姿態校正] 已達原點，原地轉正車頭中: {new_cmd}")
-                                    else:
-                                        print("🏠 [自動復位成功] 已安全退回基地！啟動視覺複檢程序...")
-                                        new_cmd = "S"
-                                        self.state = "VERIFYING"
-                                        self.verify_timer = time.time()
-                                else:
-                                    new_cmd = "S"
-                                    self.ctx['planner'].mark_target_reached() # 抵達網格點，請求拔除
+                    if self.state == "CLEANING" and target is not None:
+                        if not self.eraser_on:
+                            new_cmd = "P"  # 清潔狀態下，只要板擦沒開就是死命發送 P
+                        else:
+                            # 板擦確定開了，才開始算移動指令
+                            if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                                new_cmd = "S"
+                                self.ctx['planner'].mark_target_reached()
                             elif abs(delta_angle) > BACKWARD_ANGLE_THRESH:
                                 new_cmd = "B"
                             elif abs(delta_angle) > TURN_ANGLE_THRESH:
@@ -198,8 +182,35 @@ class FullControlMode(BaseMode):
                                 new_cmd = f"{direction}{target_abs_angle:.1f}"
                             else:
                                 new_cmd = "F"
+                    elif self.state in ["RETURNING", "VERIFYING", "IDLE"]:
+                        if self.eraser_on:
+                            new_cmd = "Y"  # 只要不是清潔狀態，板擦開著就強制關閉
                         else:
-                            new_cmd = "S"
+                            if self.state == "RETURNING" and target is not None:
+                                if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                                    angle_diff = self.home_angle - self.ctx['robot'].angle
+                                    if angle_diff > 180: angle_diff -= 360
+                                    elif angle_diff < -180: angle_diff += 360
+                                    
+                                    if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
+                                        direction = "R" if angle_diff > 0 else "L"
+                                        new_cmd = f"{direction}{self.home_angle:.1f}"
+                                    else:
+                                        print("🏠 [自動復位成功] 已安全退回基地！")
+                                        new_cmd = "S"
+                                        self.state = "VERIFYING"
+                                        self.verify_timer = time.time()
+                                elif abs(delta_angle) > BACKWARD_ANGLE_THRESH:
+                                    new_cmd = "B"
+                                elif abs(delta_angle) > TURN_ANGLE_THRESH:
+                                    direction = "R" if delta_angle > 0 else "L"
+                                    new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                else:
+                                    new_cmd = "F"
+                            else:
+                                new_cmd = "S"
+                    else:
+                        new_cmd = "S"
 
                     # 防撞智能圍籬
                     if target is not None:
@@ -290,7 +301,7 @@ class FullControlMode(BaseMode):
                 has_tasks = self.ctx['planner'].generate_task_queue(
                     dirty_list, self.ctx['robot'].x, self.ctx['robot'].y, marker_length
                 )
-                
+
                 if has_tasks:
                     self.ctx['planner'].reset_count = 0
                     self.state = "CLEANING"
