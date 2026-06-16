@@ -237,6 +237,11 @@ class FullControlMode(BaseMode):
                                     # 🌟 更新姿態紀錄
                                     self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
                                     self.ack_start_angle = self.ctx['robot'].angle
+                                else:
+                                    # 🌟🌟🌟 新增：超時看門狗 (Timeout Watchdog) 🌟🌟🌟
+                                    if current_time - self.last_send_time > 3.0:
+                                        print(f" [看門狗觸發] 等待指令 {self.last_cmd} 的 finish 封包超時！強制清空狀態以打破死鎖！")
+                                        self.last_cmd = None  # 關鍵：清空最後指令，強迫下一幀重新評估並發送新指令！
         else:
             self.ctx['planner'].current_target = None
 
