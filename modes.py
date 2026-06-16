@@ -154,7 +154,7 @@ class FullControlMode(BaseMode):
                                     
                                     if abs(angle_diff) > 10:
                                         direction = "R" if angle_diff > 0 else "L"
-                                        new_cmd = f"{direction}{abs(angle_diff):.1f}"
+                                        new_cmd = f"{direction}{self.home_angle:.1f}" #絕對角度
                                         print(f"🔄 [姿態校正] 已達原點，原地轉正車頭中: {new_cmd}")
                                     else:
                                         print("🏠 [自動復位成功] 已安全回到基地且車頭對齊！(基地座標將持續保留)")
@@ -169,7 +169,7 @@ class FullControlMode(BaseMode):
                                 new_cmd = "B"
                             elif abs(delta_angle) > 15:
                                 direction = "R" if delta_angle > 0 else "L"
-                                new_cmd = f"{direction}{abs(delta_angle):.1f}"
+                                new_cmd = f"{direction}{target_abs_angle:.1f}" #絕對角度
                             else:
                                 new_cmd = "F"
                         else:
@@ -181,7 +181,7 @@ class FullControlMode(BaseMode):
                         # 計算車子中心與邊界的最短距離
                         dist_to_edge = cv2.pointPolygonTest(roi_array, (self.ctx['robot'].x, self.ctx['robot'].y), True)
                         
-                        safe_margin = int(25 * current_scale) # 安全邊距 (約 35-40 像素)
+                        safe_margin = int(15 * current_scale) # 安全邊距 (約 35-40 像素)
                         
                         # 如果距離邊界太近 (大於 0 代表在內側，但小於安全距離)
                         if 0 <= dist_to_edge < safe_margin:
@@ -269,7 +269,7 @@ class FullControlMode(BaseMode):
                 self.is_cleaning = True
             else:
                 print("\n❌ [錯誤] 尚未辨識到車體標籤，請確保 ArUco 在畫面中再啟動！")
-                
+
         elif key == ord('p'):
             print("\n⏸️ [Mode 0] 暫停待機")
             self.is_cleaning = False
