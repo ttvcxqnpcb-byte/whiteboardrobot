@@ -80,7 +80,7 @@ class FullControlMode(BaseMode):
             exclude_bboxes=self.ctx.get('exclude_bboxes')
         )
         # 這裡依然每幀辨識，但不再即時干擾清潔規劃
-        ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
+        #ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
         self.ctx['latest_ink_mask'] = ink_mask
         dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)

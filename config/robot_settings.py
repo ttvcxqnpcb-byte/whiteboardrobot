@@ -6,12 +6,12 @@ ERASER_OFFSET_RATIO = 0.8
 MARKER_SIZE = 1.0  
 
 # 車體 3D 長方體相對於標籤中心的邊界比例
-ROBOT_3D_FRONT  = 1.7   
+ROBOT_3D_FRONT  = 1.5   
 ROBOT_3D_BACK   = 1.3   
 ROBOT_3D_LEFT   = 1.2   
 ROBOT_3D_RIGHT  = 1.2   
 ROBOT_3D_TOP    = 1.1   
-ROBOT_3D_BOTTOM = 0.1   
+ROBOT_3D_BOTTOM = 0.0   
 
 # ======================
 #  (Movement & Safety)
@@ -19,7 +19,7 @@ ROBOT_3D_BOTTOM = 0.1
 # 安全邊界距離 (以原始解析度為基準，會乘上 RES_SCALE)
 SAFE_MARGIN_BASE = 10
 # 抵達目標的距離寬容值
-ARRIVAL_DIST_BASE = 15
+ARRIVAL_DIST_BASE = 20
 # 回到基地時，判定車頭對齊的容許角度誤差
 HOME_ANGLE_TOLERANCE = 10
 # 判定需要直線後退的觸發角度 (大於此角度才後退)
