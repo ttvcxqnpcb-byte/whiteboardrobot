@@ -2,7 +2,7 @@
 
 CAMERA_ID = 0
 
-BLUETOOTH_PORT = '/dev/tty.usbserial-140'
+BLUETOOTH_PORT = 'COM9'
 
 # 畫面解析度縮放比例
 RES_SCALE = 1.5
