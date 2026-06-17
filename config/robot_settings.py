@@ -33,6 +33,8 @@ TURN_ANGLE_THRESH = 15
 # 偽造相機焦距倍率 (用於 3D 遮罩透視投影，值越大透視變形越小)
 CAMERA_FOCAL_MULTIPLIER = 2.5
 
+EXTEND_THE_ABOVE_PIXELS = 10
+
 # ==========================
 #   (Failsafe & Comp.)
 # ==========================
