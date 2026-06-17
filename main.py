@@ -13,7 +13,7 @@ try:
     from bluetooth import BTInterface
     BT_AVAILABLE = True
 except ImportError:
-    print("⚠️ 找不到 bluetooth.py，藍牙控制將無法正常運作。")
+    print(" 找不到 bluetooth.py，藍牙控制將無法正常運作。")
     BT_AVAILABLE = False
 
 
