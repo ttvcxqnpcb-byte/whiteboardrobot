@@ -60,10 +60,10 @@ class CleaningPlanner:
             if heuristic(current, goal) <= step * 1.5:
                 path = [goal]
                 while current in came_from:
-                    current = came_from[current]
-                    path.append(current)
+                    path.append(current)          # 🌟 先把當前節點加進去
+                    current = came_from[current]  # 🌟 再往前找上一個節點
                 path.reverse()
-                return path[1:] 
+                return path
                 
             for dx, dy in directions:
                 neighbor = (current[0] + dx, current[1] + dy)
@@ -81,7 +81,7 @@ class CleaningPlanner:
         return [goal]
 
     def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None, ink_mask=None):
-        """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
+        """拍下快照，將所有矩形網格化並驗證筆跡，最後計算 A* 最佳走訪路徑"""
         self.current_target = None
         self.task_queue.clear()
         
@@ -98,52 +98,49 @@ class CleaningPlanner:
             self.step_size = int(40 * self.res_scale)
         
         raw_points = []
+        
+        # 1. 收集所有潛在的網格點
         for dirty in dirty_list:
             x, y, w, h = dirty['x'], dirty['y'], dirty['w'], dirty['h']
+            temp_points = []
+            
             if w <= self.step_size and h <= self.step_size:
-                raw_points.append((dirty['cx'], dirty['cy']))
+                # 範圍太小直接取中心
+                temp_points.append((dirty['cx'], dirty['cy']))
             else:
-                for px in range(x + self.step_size//2, x + w, self.step_size):
-                    for py in range(y + self.step_size//2, y + h, self.step_size):
-                        raw_points.append((px, py))
-                # 網格化降維打擊：將大面積切碎成多個走訪點
-                
-                # 獨立計算 X 軸的網格點
+                # 網格化降維打擊
                 x_points = list(range(x + self.step_size//2, x + w, self.step_size))
-                # 【防呆機制】如果寬度太窄（小於半個 step_size），強制填入幾何中心 X 座標
-                if not x_points:
-                    x_points = [dirty['cx']]
+                if not x_points: x_points = [dirty['cx']]
 
-                # 獨立計算 Y 軸的網格點
                 y_points = list(range(y + self.step_size//2, y + h, self.step_size))
-                # 【防呆機制】如果高度太細（小於半個 step_size），強制填入幾何中心 Y 座標
-                if not y_points:
-                    y_points = [dirty['cy']]
+                if not y_points: y_points = [dirty['cy']]
 
-                # 將獨立抓出來的 X 與 Y 點進行交乘組合
                 for px in x_points:
                     for py in y_points:
-                        if ink_mask is not None:
-                            # 建立一個該網格點周圍的搜索區塊 (大小為 step_size)
-                            r = self.step_size // 2
-                            h_img, w_img = ink_mask.shape
-                            
-                            # 確保不超出圖片邊界
-                            y1, y2 = max(0, py - r), min(h_img, py + r)
-                            x1, x2 = max(0, px - r), min(w_img, px + r)
-                            
-                            # 挖出這個網格的小區塊
-                            roi = ink_mask[y1:y2, x1:x2]
-                            
-                            # 🌟 如果這個網格內有白點 (也就是真的有筆跡)，才把它加入清單！
-                            if roi.size > 0 and cv2.countNonZero(roi) > 0:
-                                raw_points.append((px, py))
-                        else:
-                            raw_points.append((px, py))
+                        temp_points.append((px, py))
+            
+            # 🌟 [完美合併] 2. 統一驗證網格內是否「真的有筆跡」(ink_mask)，修復小方塊被漏驗證的 Bug
+            for px, py in temp_points:
+                if ink_mask is not None:
+                    r = self.step_size // 2
+                    h_img, w_img = ink_mask.shape
+                    
+                    # 【重要邊界防護】確保即使網格在畫面最邊緣，也不會造成 Array Index 錯誤閃退
+                    y1, y2 = max(0, py - r), min(h_img, py + r)
+                    x1, x2 = max(0, px - r), min(w_img, px + r)
+                    
+                    roi = ink_mask[y1:y2, x1:x2]
+                    
+                    # 只有該網格區塊內有實質筆跡時，才正式加入待清單
+                    if roi.size > 0 and cv2.countNonZero(roi) > 0:
+                        raw_points.append((px, py))
+                else:
+                    raw_points.append((px, py))
 
         if not raw_points:
             return False
 
+        # 3. 結合貪婪最佳化與 A* 避障計算最終路徑
         curr_x, curr_y = int(start_x), int(start_y)
         while raw_points:
             best_idx = 0
@@ -156,13 +153,13 @@ class CleaningPlanner:
             
             next_target = raw_points.pop(best_idx)
             
-            # 🌟 [核心升級] 使用 A* 演算法計算包含避障繞道的路徑點
+            # 使用 A* 演算法計算包含避障繞道的路徑點
             path = self._a_star_search((curr_x, curr_y), next_target)
             self.task_queue.extend(path)
             
             curr_x, curr_y = next_target[0], next_target[1]
 
-        print(f"[Planner] 任務快照已建立！共產出 {len(self.task_queue)} 個中繼網格點 (包含避障繞道)。")
+        print(f"[Planner] 任務快照已建立！共產出 {len(self.task_queue)} 個中繼網格點 (已驗證筆跡並包含避障繞道)。")
         return True
 
     def get_current_target(self):
