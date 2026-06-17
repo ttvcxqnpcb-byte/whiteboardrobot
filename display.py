@@ -16,15 +16,19 @@ class Visualizer:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.circle(frame, (tx, ty), 3, (0, 0, 255), -1)
 
+        # 🌟 先在畫線前，決定要用哪個點來當作連線起點 (若有投影點就用投影點)
+        start_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
+        start_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
+
         if planner.task_queue or planner.current_target:
             pts = []
             if planner.current_target:
                 pts.append(planner.current_target)
             pts.extend(planner.task_queue)
             
-            # 從車頭連一條線到第一個目標點
-            if robot.x is not None and robot.y is not None and len(pts) > 0:
-                cv2.line(frame, (robot.x, robot.y), pts[0], (0, 255, 255), 2)
+            # 從車頭連一條線到第一個目標點 (🌟 修正起點)
+            if start_x is not None and start_y is not None and len(pts) > 0:
+                cv2.line(frame, (start_x, start_y), pts[0], (0, 255, 255), 2)
 
             # 將序列中的任務點用線連起來，並畫出網格點
             for i in range(len(pts) - 1):
@@ -34,22 +38,35 @@ class Visualizer:
             if len(pts) > 0:
                 cv2.circle(frame, pts[-1], 4, (255, 200, 0), -1)
                 
-        if planner.current_target and robot.x is not None and robot.y is not None:
+        if planner.current_target and start_x is not None and start_y is not None:
             tx, ty = planner.current_target
-            cv2.line(frame, (robot.x, robot.y), (tx, ty), (0, 255, 255), 2)
+            # (🌟 修正起點)
+            cv2.line(frame, (start_x, start_y), (tx, ty), (0, 255, 255), 2)
             cv2.drawMarker(frame, (tx, ty), (0, 165, 255), cv2.MARKER_CROSS, 15, 2)
-
         if aruco_corners is not None:
+            # 🔴 1. 繪製原始 2D 偵測資訊 (紅色外框、藍色車尾、黃色板擦中心)
             cv2.polylines(frame, [np.array(aruco_corners, dtype=np.int32)], isClosed=True, color=(0, 0, 255), thickness=2)
             cv2.circle(frame, (robot.aruco_x, robot.aruco_y), 4, (255, 0, 0), -1)
             cv2.circle(frame, (robot.x, robot.y), 4, (0, 255, 255), -1)
             cv2.line(frame, (robot.aruco_x, robot.aruco_y), (robot.x, robot.y), (255, 255, 255), 1)
+            
+            # 🟢 2. 繪製 3D 空間投影校正後的實體定位資訊 (綠色外框、青色實體車尾、橘色實體板擦)
+            if getattr(robot, 'proj_aruco_corners', None) is not None:
+                cv2.polylines(frame, [robot.proj_aruco_corners], isClosed=True, color=(0, 255, 0), thickness=2)
+            if getattr(robot, 'proj_aruco_x', None) is not None and getattr(robot, 'proj_aruco_y', None) is not None:
+                cv2.circle(frame, (robot.proj_aruco_x, robot.proj_aruco_y), 4, (255, 255, 0), -1) # 青色車尾
+            if getattr(robot, 'proj_x', None) is not None and getattr(robot, 'proj_y', None) is not None:
+                cv2.circle(frame, (robot.proj_x, robot.proj_y), 4, (0, 165, 255), -1) # 橘色板擦
+                if robot.proj_aruco_x is not None:
+                    cv2.line(frame, (robot.proj_aruco_x, robot.proj_aruco_y), (robot.proj_x, robot.proj_y), (0, 255, 0), 1)
         
         if robot_mask_pts is not None:
             cv2.polylines(frame, [robot_mask_pts], isClosed=True, color=(255, 0, 255), thickness=2)
             cv2.putText(frame, "Mask Area", tuple(robot_mask_pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
 
-        status_text = f"Pos:({robot.x},{robot.y}) Ang:{robot.angle:.1f} | Dirty Cells: {whiteboard.get_dirty_count()}"
+        curr_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
+        curr_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
+        status_text = f"Pos:({curr_x},{curr_y}) Ang:{robot.angle:.1f} | Dirty Cells: {whiteboard.get_dirty_count()}"
         cv2.putText(frame, status_text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         if planner.current_target:
