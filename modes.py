@@ -1,4 +1,4 @@
-# modes.py beaver
+# modes.py 
 import cv2
 import time
 from abc import ABC, abstractmethod
@@ -134,7 +134,6 @@ class FullControlMode(BaseMode):
                         target = self.home_pos
 
                 # 🌟 目標攻堅看門狗 (Watchdog)
-                # 🌟 目標攻堅看門狗 (Watchdog)
                 if self.state == "CLEANING" and target is not None:
                     if target != self.current_target_cache:
                         self.current_target_cache = target
@@ -255,12 +254,20 @@ class FullControlMode(BaseMode):
                             new_cmd = "Y"  
                         else:
                             if self.state == "RETURNING" and target is not None:
-                                arrival_radius = int(ARRIVAL_DIST_BASE * current_scale)
+                                # 1. 處理狀態鎖定（Latch）與極端脫困邊界條件
                                 if getattr(self, 'is_aligning_home', False):
-                                    arrival_radius = int(ARRIVAL_DIST_BASE * current_scale * 2.5) 
+                                    # 極端防護：若真的因為打滑或碰撞偏離基地太遠 (大於5倍半徑)，才放開鎖定重新導航
+                                    if pixel_dist > int(ARRIVAL_DIST_BASE * current_scale * 5.0):
+                                        print("🛑 [自動復位] 偏離基地過遠，解除回正鎖定，重新進入導航！")
+                                        self.is_aligning_home = False
+                                else:
+                                    # 尚未進入回正狀態時，才去檢查是否抵達基地周圍
+                                    if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                                        self.is_aligning_home = True
 
-                                if pixel_dist < arrival_radius:
-                                    self.is_aligning_home = True
+                                # 2. 依據鎖定狀態執行對應邏輯，徹底切斷兩者交叉感染
+                                if self.is_aligning_home:
+                                    # 【角度死區與回正鎖定】此時完全屏蔽 delta_angle，只認絕對角度自轉
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
                                     if angle_diff > 180: angle_diff -= 360
                                     elif angle_diff < -180: angle_diff += 360
@@ -274,13 +281,13 @@ class FullControlMode(BaseMode):
                                         self.state = "VERIFYING"
                                         self.verify_timer = time.time()
                                         self.is_aligning_home = False
-                                elif abs(delta_angle) > dynamic_turn_thresh:
-                                    self.is_aligning_home = False
-                                    direction = "R" if delta_angle > 0 else "L"
-                                    new_cmd = f"{direction}{target_abs_angle:.1f}"
                                 else:
-                                    self.is_aligning_home = False
-                                    new_cmd = "F"
+                                    # 只有在距離還很遠、未鎖定回正時，才去追逐目標點的相對角
+                                    if abs(delta_angle) > dynamic_turn_thresh:
+                                        direction = "R" if delta_angle > 0 else "L"
+                                        new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                    else:
+                                        new_cmd = "F"
                             else:
                                 new_cmd = "S"
                     else:
