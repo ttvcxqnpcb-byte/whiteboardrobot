@@ -154,13 +154,32 @@ class Robot:
             proj_aruco_pts, _ = cv2.projectPoints(obj_pts_on_board, rvec, tvec, self.cam_matrix, self.dist_coeffs)
             self.proj_aruco_corners = proj_aruco_pts.reshape(-1, 2).astype(np.int32)
             
-            # 2. 投影後的精準實體板擦中心 (改用 Top 的前緣：索引 0 與 1)
-            self.proj_x = int((self.box_3d_pts[0][0] + self.box_3d_pts[1][0]) / 2)
-            self.proj_y = int((self.box_3d_pts[0][1] + self.box_3d_pts[1][1]) / 2)
+            # 2. 🌟 投影精準的「實體板擦中心」與「ArUco標籤中心」(不再使用長方形邊界)
+            # 在 3D 標籤座標系中，Y軸正向為車頭。板擦中心位於 Y = ERASER_OFFSET_RATIO，標籤中心位於原點。
+            special_3d_pts = np.array([
+                [0.0, ERASER_OFFSET_RATIO, Top],  # 板擦中心
+                [0.0, 0.0, Top]                   # 標籤中心 (家)
+            ], dtype=np.float32)
+            proj_special_pts, _ = cv2.projectPoints(special_3d_pts, rvec, tvec, self.cam_matrix, self.dist_coeffs)
+            
+            self.proj_x = int(proj_special_pts[0][0][0])
+            self.proj_y = int(proj_special_pts[0][0][1])
+            self.proj_aruco_x = int(proj_special_pts[1][0][0])
+            self.proj_aruco_y = int(proj_special_pts[1][0][1])
 
-            # 3. 投影後的精準實體車尾基準點 (改用 Top 的後緣：索引 2 與 3)
-            self.proj_aruco_x = int((self.box_3d_pts[2][0] + self.box_3d_pts[3][0]) / 2)
-            self.proj_aruco_y = int((self.box_3d_pts[2][1] + self.box_3d_pts[3][1]) / 2)
+            # 3. 🌟 利用投影後 (已完全消除透視變形) 的角點，覆寫車體的真實物理角度
+            pf_x = (self.proj_aruco_corners[0][0] + self.proj_aruco_corners[1][0]) / 2.0
+            pf_y = (self.proj_aruco_corners[0][1] + self.proj_aruco_corners[1][1]) / 2.0
+            pb_x = (self.proj_aruco_corners[2][0] + self.proj_aruco_corners[3][0]) / 2.0
+            pb_y = (self.proj_aruco_corners[2][1] + self.proj_aruco_corners[3][1]) / 2.0
+            
+            p_dx = pf_x - pb_x
+            p_dy = pf_y - pb_y
+            p_angle_cv = np.degrees(np.arctan2(p_dy, p_dx))
+            p_abs_angle = p_angle_cv + 90
+            if p_abs_angle > 180:
+                p_abs_angle -= 360
+            self.angle = p_abs_angle  # 覆寫原本帶有透視誤差的 2D 角度！ / 2)
         else:
             self.mask_polygon = None
             self.box_3d_pts = None
