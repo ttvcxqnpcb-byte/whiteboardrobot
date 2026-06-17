@@ -80,7 +80,6 @@ class CleaningPlanner:
         print(f"⚠️ [Planner] 找不到完美繞路路線，採直線前往 {goal}")
         return [goal]
 
-    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None):
     def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None, ink_mask=None):
         """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
         self.current_target = None
