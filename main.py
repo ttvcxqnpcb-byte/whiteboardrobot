@@ -1,4 +1,4 @@
-# main.py
+# main.py 34+35
 import cv2
 from vision import VisionManager
 from extractor import FeatureExtractor

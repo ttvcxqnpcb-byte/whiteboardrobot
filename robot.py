@@ -148,16 +148,19 @@ class Robot:
 
             # 🌟【動態欄位擴充】解算 3D 空間投影後的實際定位座標，不破壞原始 2D 觀測值
             # 1. 投影後的 ArUco 四個角點平面座標
-            proj_aruco_pts, _ = cv2.projectPoints(self.obj_pts, rvec, tvec, self.cam_matrix, self.dist_coeffs)
+            obj_pts_on_board = self.obj_pts.copy()
+            obj_pts_on_board[:, 2] = Top  # 將 Z 軸座標全部改為貼齊白板的 Top
+
+            proj_aruco_pts, _ = cv2.projectPoints(obj_pts_on_board, rvec, tvec, self.cam_matrix, self.dist_coeffs)
             self.proj_aruco_corners = proj_aruco_pts.reshape(-1, 2).astype(np.int32)
             
-            # 2. 投影後的精準實體板擦中心 (底盤前緣左右角之中點)
-            self.proj_x = int((self.box_3d_pts[4][0] + self.box_3d_pts[5][0]) / 2)
-            self.proj_y = int((self.box_3d_pts[4][1] + self.box_3d_pts[5][1]) / 2)
-            
-            # 3. 投影後的精準實體車尾基準點 (底盤後緣左右角之中點)
-            self.proj_aruco_x = int((self.box_3d_pts[6][0] + self.box_3d_pts[7][0]) / 2)
-            self.proj_aruco_y = int((self.box_3d_pts[6][1] + self.box_3d_pts[7][1]) / 2)
+            # 2. 投影後的精準實體板擦中心 (改用 Top 的前緣：索引 0 與 1)
+            self.proj_x = int((self.box_3d_pts[0][0] + self.box_3d_pts[1][0]) / 2)
+            self.proj_y = int((self.box_3d_pts[0][1] + self.box_3d_pts[1][1]) / 2)
+
+            # 3. 投影後的精準實體車尾基準點 (改用 Top 的後緣：索引 2 與 3)
+            self.proj_aruco_x = int((self.box_3d_pts[2][0] + self.box_3d_pts[3][0]) / 2)
+            self.proj_aruco_y = int((self.box_3d_pts[2][1] + self.box_3d_pts[3][1]) / 2)
         else:
             self.mask_polygon = None
             self.box_3d_pts = None

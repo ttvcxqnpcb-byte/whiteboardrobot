@@ -293,10 +293,10 @@ class FullControlMode(BaseMode):
                         box_pts = getattr(self.ctx['robot'], 'box_3d_pts', None)
                         if box_pts is not None and len(box_pts) == 8:
                             # 🌟 利用 3D 底盤四個角落投影點進行極致精準的撞牆偵測 (轉為 float 相容 OpenCV)
-                            dist_fl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[4][0]), float(box_pts[4][1])), True)
-                            dist_fr = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[5][0]), float(box_pts[5][1])), True)
-                            dist_br = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[6][0]), float(box_pts[6][1])), True)
-                            dist_bl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[7][0]), float(box_pts[7][1])), True)
+                            dist_fl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[0][0]), float(box_pts[0][1])), True)
+                            dist_fr = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[1][0]), float(box_pts[1][1])), True)
+                            dist_br = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[2][0]), float(box_pts[2][1])), True)
+                            dist_bl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[3][0]), float(box_pts[3][1])), True)
                             
                             dist_front = min(dist_fl, dist_fr) # 車頭風險取左右前角最小值
                             dist_back = min(dist_br, dist_bl)  # 車尾風險取左右後角最小值
