@@ -8,6 +8,7 @@ from planner import CleaningPlanner
 from display import Visualizer
 from modes import FullControlMode, VisionDebugMode, ManualControlMode
 from config.system_settings import CAMERA_ID, BLUETOOTH_PORT, RES_SCALE, GRID_CELL_SIZE
+from config.robot_settings import EXTEND_THE_ABOVE_PIXELS
 
 try:
     from bluetooth import BTInterface
@@ -53,6 +54,13 @@ def mouse_callback(event, x, y, flags, param):
                 # 確保反向拖曳也能畫出正確的矩形 (將長寬轉為正整數)
                 bx, by = min(box_start[0], x), min(box_start[1], y)
                 bw, bh = abs(w), abs(h)
+
+                extend_up_pixels = EXTEND_THE_ABOVE_PIXELS  # 你可以隨時修改這個數字，數值越大，上方長高越多
+                new_by = max(0, by - extend_up_pixels) # 確保不要超出畫面最上方邊界
+                extend_amount = by - new_by            # 計算實際長高了多少
+                by = new_by                            # 更新起始 y 座標
+                bh = bh + extend_amount
+
                 if bw > 5 and bh > 5: # 避免手抖誤點產生無效框
                     exclude_bboxes.append((bx, by, bw, bh))
                     print(f"🛡️ 新增字跡保留區: 座標({bx}, {by}), 大小 {bw}x{bh}")
