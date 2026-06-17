@@ -14,11 +14,7 @@ class VisionManager:
 
     def get_aruco_ready_mask(self, frame, roi_polygon=None):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, aruco_mask = cv2.threshold(gray, ARUCO_THRESH, 255, cv2.THRESH_BINARY)
-        if roi_polygon is not None:
-            roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(roi_mask, [np.array(roi_polygon, dtype=np.int32)], 255)
-            aruco_mask[roi_mask == 0] = 255
+        _, aruco_mask = cv2.threshold(gray, ARUCO_THRESH, 255, cv2.THRESH_BINARY)        
         return aruco_mask
 
     def get_ink_clean_mask(self, frame, robot_mask_pts=None, roi_polygon=None):
