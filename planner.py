@@ -1,5 +1,6 @@
 # planner.py
 import math
+import cv2
 
 class CleaningPlanner:
     def __init__(self, res_scale=1.0):
@@ -18,7 +19,7 @@ class CleaningPlanner:
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None):
+    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None, ink_mask=None):
         """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
         self.current_target = None
         self.task_queue.clear()
@@ -44,9 +45,39 @@ class CleaningPlanner:
                 raw_points.append((dirty['cx'], dirty['cy']))
             else:
                 # 網格化降維打擊：將大面積切碎成多個走訪點
-                for px in range(x + self.step_size//2, x + w, self.step_size):
-                    for py in range(y + self.step_size//2, y + h, self.step_size):
-                        raw_points.append((px, py))
+                
+                # 獨立計算 X 軸的網格點
+                x_points = list(range(x + self.step_size//2, x + w, self.step_size))
+                # 【防呆機制】如果寬度太窄（小於半個 step_size），強制填入幾何中心 X 座標
+                if not x_points:
+                    x_points = [dirty['cx']]
+
+                # 獨立計算 Y 軸的網格點
+                y_points = list(range(y + self.step_size//2, y + h, self.step_size))
+                # 【防呆機制】如果高度太細（小於半個 step_size），強制填入幾何中心 Y 座標
+                if not y_points:
+                    y_points = [dirty['cy']]
+
+                # 將獨立抓出來的 X 與 Y 點進行交乘組合
+                for px in x_points:
+                    for py in y_points:
+                        if ink_mask is not None:
+                            # 建立一個該網格點周圍的搜索區塊 (大小為 step_size)
+                            r = self.step_size // 2
+                            h_img, w_img = ink_mask.shape
+                            
+                            # 確保不超出圖片邊界
+                            y1, y2 = max(0, py - r), min(h_img, py + r)
+                            x1, x2 = max(0, px - r), min(w_img, px + r)
+                            
+                            # 挖出這個網格的小區塊
+                            roi = ink_mask[y1:y2, x1:x2]
+                            
+                            # 🌟 如果這個網格內有白點 (也就是真的有筆跡)，才把它加入清單！
+                            if roi.size > 0 and cv2.countNonZero(roi) > 0:
+                                raw_points.append((px, py))
+                        else:
+                            raw_points.append((px, py))
 
         if not raw_points:
             return False
