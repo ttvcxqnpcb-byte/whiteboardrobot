@@ -28,18 +28,65 @@ class CleaningPlanner:
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def _is_collision(self, x, y):
-        """🌟 [新增] 檢查該座標是否踩入禁區 (包含安全邊界)"""
+    def _is_collision(self, x, y, extra_margin=0):
+        """檢查該座標是否踩入禁區 (可彈性加大 margin 提早繞道)"""
         if not self.exclude_bboxes:
             return False
+        margin = self.safe_margin + extra_margin
         for (ex, ey, ew, eh) in self.exclude_bboxes:
-            if (ex - self.safe_margin <= x <= ex + ew + self.safe_margin) and \
-               (ey - self.safe_margin <= y <= ey + eh + self.safe_margin):
+            if (ex - margin <= x <= ex + ew + margin) and \
+               (ey - margin <= y <= ey + eh + margin):
                 return True
         return False
 
+    def _is_line_collision(self, start, goal):
+        """檢查起點到終點的直線上是否會穿過禁區"""
+        if not self.exclude_bboxes:
+            return False
+            
+        x1, y1 = start
+        x2, y2 = goal
+        dist = math.hypot(x2 - x1, y2 - y1)
+        if dist == 0:
+            return self._is_collision(x1, y1)
+        
+        sample_step = max(5, self.safe_margin // 2)
+        steps = int(dist / sample_step)
+        
+        # 🌟 讓直線判斷的雷達稍微放大 (提早觸發 A* 繞道，不要等快撞到了才繞)
+        trigger_margin = self.step_size // 2 
+        
+        for i in range(steps + 1):
+            t = i / steps if steps > 0 else 0
+            sx = x1 + t * (x2 - x1)
+            sy = y1 + t * (y2 - y1)
+            if self._is_collision(sx, sy, extra_margin=trigger_margin):
+                return True  
+        return False  
+
+    def _get_clearance_penalty(self, x, y):
+        """🌟 [新增] 空間恐懼懲罰：計算靠近禁區的額外過路費"""
+        penalty = 0
+        if not self.exclude_bboxes:
+            return 0
+        for (ex, ey, ew, eh) in self.exclude_bboxes:
+            # 計算該網格點到這個禁區 (加上安全邊界) 的最短距離
+            cx = max(ex - self.safe_margin, min(x, ex + ew + self.safe_margin))
+            cy = max(ey - self.safe_margin, min(y, ey + eh + self.safe_margin))
+            dist = math.hypot(x - cx, y - cy)
+            
+            # 如果距離安全邊界不到 1.5 倍的網格大小，就開始收過路費
+            buffer_zone = self.step_size * 1.5
+            if dist < buffer_zone:
+                # 越靠近禁區，懲罰越重！迫使 A* 寧願繞點遠路
+                penalty += (buffer_zone - dist) * 10.0 
+        return penalty
+
     def _a_star_search(self, start, goal):
-        """🌟 [核心升級] A* 尋路演算法，自動繞過禁區產生中繼點"""
+        """🌟 A* 尋路演算法，自動繞過禁區並「保持安全距離」"""
+        if not self._is_line_collision(start, goal):
+            return [goal]
+
         def heuristic(a, b):
             return math.hypot(b[0] - a[0], b[1] - a[1])
 
@@ -61,17 +108,24 @@ class CleaningPlanner:
             if heuristic(current, goal) <= step * 1.5:
                 path = [goal]
                 while current in came_from:
-                    path.append(current)          # 🌟 先把當前節點加進去
-                    current = came_from[current]  # 🌟 再往前找上一個節點
+                    path.append(current)          
+                    current = came_from[current]  
                 path.reverse()
                 return path
                 
             for dx, dy in directions:
                 neighbor = (current[0] + dx, current[1] + dy)
+                
+                # 1. 絕對死線判斷 (踩進 hard_margin 直接剔除)
                 if self._is_collision(neighbor[0], neighbor[1]):
                     continue
                     
-                tentative_g = g_score[current] + math.hypot(dx, dy)
+                # 🌟 2. 加入安全距離懲罰 (Soft Penalty)
+                move_cost = math.hypot(dx, dy)
+                clearance_cost = self._get_clearance_penalty(neighbor[0], neighbor[1])
+                
+                tentative_g = g_score[current] + move_cost + clearance_cost
+                
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g

@@ -138,7 +138,10 @@ class FullControlMode(BaseMode):
                             self.state = "IDLE"
                             
                 elif self.state == "RETURNING":
-                    target = self.home_pos
+                    # 🌟 [修改] 正確領取 A* 回家路徑的中繼點，如果全部走完了才設定為家
+                    target = self.ctx['planner'].get_current_target()
+                    if target is None:
+                        target = self.home_pos
                     
                 elif self.state == "CLEANING":
                     target = self.ctx['planner'].get_current_target()
@@ -255,11 +258,29 @@ class FullControlMode(BaseMode):
                             new_cmd = "Y"  
                         else:
                             if self.state == "RETURNING" and target is not None:
+                                # 1. 防呆：如果自動復位偏離太多，解除回正鎖定
                                 if getattr(self, 'is_aligning_home', False):
                                     if pixel_dist > int(ARRIVAL_DIST_BASE * current_scale * 5.0):
                                         print("🛑 [自動復位] 偏離基地過遠，解除回正鎖定，重新進入導航！")
                                         self.is_aligning_home = False
+
+                                # 2. 嚴格分離的三階段狀態機 (回正中 / 抵達點 / 導航中)
+                                if getattr(self, 'is_aligning_home', False):
+                                    angle_diff = self.home_angle - self.ctx['robot'].angle
+                                    if angle_diff > 180: angle_diff -= 360
+                                    elif angle_diff < -180: angle_diff += 360
+                                    
+                                    if abs(angle_diff) > HOME_ANGLE_TOLERANCE:
+                                        direction = "R" if angle_diff > 0 else "L"
+                                        new_cmd = f"{direction}{self.home_angle:.1f}"
+                                    else:
+                                        print("🏠 [自動復位成功] 已安全退回基地！啟動視覺複檢程序...")
+                                        new_cmd = "S"
+                                        self.state = "VERIFYING"
+                                        self.verify_timer = time.time()
+                                        self.is_aligning_home = False
                                 else:
+                                    # 尚未啟動原地回正，正在前往家或中繼點的路上
                                     if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
                                         self.ctx['planner'].mark_target_reached()
                                         self.arrive_pause_expiry = current_time + 0.3 # 抵達中繼點停頓 0.3 秒，讓路徑更穩定
@@ -269,6 +290,13 @@ class FullControlMode(BaseMode):
                                         if not self.ctx['planner'].task_queue and self.ctx['planner'].current_target is None:
                                             self.is_aligning_home = True
                                             print("🏠 [準備復位] 抵達基地座標，開始回正角度...")
+                                    else:
+                                        # 距離還沒到，根據角度決定直走或轉彎
+                                        if abs(delta_angle) > dynamic_turn_thresh:
+                                            direction = "R" if delta_angle > 0 else "L"
+                                            new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                        else:
+                                            new_cmd = "F"
 
                                 if self.is_aligning_home:
                                     angle_diff = self.home_angle - self.ctx['robot'].angle
@@ -296,17 +324,25 @@ class FullControlMode(BaseMode):
                         new_cmd = "S"
                         
                     # ==========================================
-                    # 🌟 避障智能圍籬 (保留禁區動態避障)
+                    # 🌟 避障智能圍籬 (動態反向脫困 + 狀態座標切換)
                     # ==========================================
                     if target is not None:
+                        # 1. 根據當下是「擦拭」還是「回家」，決定要用哪個中心點來當作碰撞探測器
+                        check_x = nav_aruco_x if self.state == "RETURNING" else nav_x
+                        check_y = nav_aruco_y if self.state == "RETURNING" else nav_y
+                        
                         safe_margin = int(SAFE_MARGIN_BASE * current_scale)
                         exclude_boxes = self.ctx.get('exclude_bboxes', [])
                         if len(exclude_boxes) > 0:
                             for (ex, ey, ew, eh) in exclude_boxes:
-                                if (ex - safe_margin < nav_x < ex + ew + safe_margin) and \
-                                   (ey - safe_margin < nav_y < ey + eh + safe_margin):
-                                    print("🛑 [避障圍籬] 即將誤闖保留禁區，強制倒車迴避！")
-                                    new_cmd = "B" 
+                                if (ex - safe_margin < check_x < ex + ew + safe_margin) and \
+                                   (ey - safe_margin < check_y < ey + eh + safe_margin):
+                                    
+                                    # 2. 🌟 動態脫困邏輯：從哪裡進來，就從哪裡出去！
+                                    # 如果上一動是倒車(B)撞到，就前進(F)；否則預設倒車(B)逃離
+                                    escape_cmd = "F" if self.last_cmd == "B" else "B"
+                                    print(f"🛑 [避障圍籬] 觸碰禁區警戒線！啟動反向脫困：{escape_cmd}！")
+                                    new_cmd = escape_cmd 
                                     break
                                     
                     # 🌟【全新防卡死特化】突破 IMU 與視覺的絕對視角差異死結
