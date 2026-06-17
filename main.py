@@ -71,6 +71,16 @@ def main():
     if not roi_polygon or len(roi_polygon) != 4:
         cap.release()
         return
+    
+    # 🌟 [新增] 框選不擦拭的保留區
+    ret, frame = cap.read()
+    print("\n" + "=" * 40)
+    print("🛡️ 請框選【保留區 (不擦拭的區塊)】：")
+    print("   - 滑鼠拖曳拉出矩形，按 [Space] 或 [Enter] 確認一個區塊。")
+    print("   - 可重複框選多個。完成所有框選請按 [Esc] 或 [q]。")
+    print("=" * 40)
+    exclude_bboxes = cv2.selectROIs("Select Keep-out Zones", frame, showCrosshair=True, fromCenter=False)
+    cv2.destroyWindow("Select Keep-out Zones")
 
     bt_manager = None
     if BT_AVAILABLE:

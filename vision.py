@@ -39,6 +39,11 @@ class VisionManager:
         if robot_mask_pts is not None:
             cv2.fillPoly(ink_thresh, [robot_mask_pts], 0)
             
+        # 🌟 [新增] 將使用者框選的保留區塗黑，無視裡面的筆跡
+        if exclude_bboxes is not None and len(exclude_bboxes) > 0:
+            for (ex, ey, ew, eh) in exclude_bboxes:
+                cv2.rectangle(ink_thresh, (ex, ey), (ex + ew, ey + eh), 0, -1)
+
         if roi_polygon is not None:
             ink_thresh = cv2.bitwise_and(ink_thresh, roi_mask)
             

@@ -6,17 +6,28 @@ class Visualizer:
     def __init__(self, roi_polygon):
         self.roi_pts = np.array([roi_polygon], dtype=np.int32)
 
-    def draw_hud(self, frame, robot, whiteboard, planner, aruco_corners, dirty_rects, robot_mask_pts=None):        
+    def draw_hud(self, frame, robot, whiteboard, planner, aruco_corners, dirty_rects, robot_mask_pts=None, exclude_bboxes=None):        
         overlay = frame.copy()
+        # 繪製主要的白板邊界 ROI (綠色填充)
         cv2.fillPoly(overlay, self.roi_pts, (0, 255, 0))
+        
+        # 🌟 [新增] 繪製使用者框選的保留禁區 (紅色半透明矩形與警告標示)
+        if exclude_bboxes is not None and len(exclude_bboxes) > 0:
+            for (ex, ey, ew, eh) in exclude_bboxes:
+                cv2.rectangle(overlay, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), -1) # 半透明紅色填充
+                cv2.rectangle(frame, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), 2)    # 紅色實線邊框
+                cv2.putText(frame, "KEEP OUT", (ex, ey - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+        # 重新合成半透明 HUD 圖層
         cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
         cv2.polylines(frame, self.roi_pts, isClosed=True, color=(0, 255, 0), thickness=2)
 
+        # 繪製偵測到的髒污矩形
         for x, y, w, h, tx, ty in dirty_rects:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.circle(frame, (tx, ty), 3, (0, 0, 255), -1)
 
-        # 🌟 先在畫線前，決定要用哪個點來當作連線起點 (若有投影點就用投影點)
+        # 🌟 先在畫線前，決定要用哪個點來當作連線起點 (若有投影點則優先採用 3D 投影點)
         start_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
         start_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
 
@@ -26,7 +37,7 @@ class Visualizer:
                 pts.append(planner.current_target)
             pts.extend(planner.task_queue)
             
-            # 從車頭連一條線到第一個目標點 (🌟 修正起點)
+            # 從實體/投影車頭連一條黃色導航線到第一個目標點 (🌟 修正起點)
             if start_x is not None and start_y is not None and len(pts) > 0:
                 cv2.line(frame, (start_x, start_y), pts[0], (0, 255, 255), 2)
 
@@ -43,6 +54,7 @@ class Visualizer:
             # (🌟 修正起點)
             cv2.line(frame, (start_x, start_y), (tx, ty), (0, 255, 255), 2)
             cv2.drawMarker(frame, (tx, ty), (0, 165, 255), cv2.MARKER_CROSS, 15, 2)
+            
         if aruco_corners is not None:
             # 🔴 1. 繪製原始 2D 偵測資訊 (紅色外框、藍色車尾、黃色板擦中心)
             cv2.polylines(frame, [np.array(aruco_corners, dtype=np.int32)], isClosed=True, color=(0, 0, 255), thickness=2)
