@@ -102,8 +102,23 @@ class CleaningPlanner:
             if w <= self.step_size and h <= self.step_size:
                 raw_points.append((dirty['cx'], dirty['cy']))
             else:
-                for px in range(x + self.step_size//2, x + w, self.step_size):
-                    for py in range(y + self.step_size//2, y + h, self.step_size):
+                # 網格化降維打擊：將大面積切碎成多個走訪點
+                
+                # 獨立計算 X 軸的網格點
+                x_points = list(range(x + self.step_size//2, x + w, self.step_size))
+                # 【防呆機制】如果寬度太窄（小於半個 step_size），強制填入幾何中心 X 座標
+                if not x_points:
+                    x_points = [dirty['cx']]
+
+                # 獨立計算 Y 軸的網格點
+                y_points = list(range(y + self.step_size//2, y + h, self.step_size))
+                # 【防呆機制】如果高度太細（小於半個 step_size），強制填入幾何中心 Y 座標
+                if not y_points:
+                    y_points = [dirty['cy']]
+
+                # 將獨立抓出來的 X 與 Y 點進行交乘組合
+                for px in x_points:
+                    for py in y_points:
                         raw_points.append((px, py))
 
         if not raw_points:

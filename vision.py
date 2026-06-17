@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from config.vision_settings import *
+from config.vision_settings import ARUCO_THRESH, BLUR_BASE_SIZE, BLOCK_BASE_SIZE, ADAPTIVE_C
 
 class VisionManager:
     def __init__(self, res_scale = 1.0):
