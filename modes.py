@@ -209,7 +209,14 @@ class FullControlMode(BaseMode):
                                         self.last_blind_warn = current_time
                     
                     # 🌟 動態角度遲滯 (Hysteresis)
-                    dynamic_turn_thresh = TURN_ANGLE_THRESH * 1.8 if self.last_cmd == "F" else TURN_ANGLE_THRESH
+                    if self.last_cmd is not None and self.last_cmd[0] in ['L', 'R']:
+                        # 剛執行完轉向，給予極大的視覺寬容度 (例如放寬到 2.5 倍)
+                        # 強迫系統妥協，放行前進指令 (F)，車子一移動就能打破原地透視錯覺！
+                        dynamic_turn_thresh = TURN_ANGLE_THRESH * 2.5  
+                    elif self.last_cmd == "F":
+                        dynamic_turn_thresh = TURN_ANGLE_THRESH * 1.8
+                    else:
+                        dynamic_turn_thresh = TURN_ANGLE_THRESHc_turn_thresh = TURN_ANGLE_THRESH * 1.8 if self.last_cmd == "F" else TURN_ANGLE_THRESH
 
                     # 產生新指令
                     # 🌟 新增：如果還在「抵達喘息期」，強制維持煞車，不處理盲區也不產生新動作
