@@ -1,4 +1,4 @@
-# modes.py elephant
+# modes.py beaver
 import cv2
 import time
 from abc import ABC, abstractmethod
@@ -56,6 +56,7 @@ class FullControlMode(BaseMode):
         self.cmd_lock_expiry = 0
         self.verify_timer = 0
         self.is_aligning_home = False
+        self.cmd_start_time = 0
 
     def activate(self):
         print("\n📡 [Mode 0] 切換至全自動快照任務模式 (藍牙自動連線已啟動)")
@@ -133,21 +134,29 @@ class FullControlMode(BaseMode):
                         target = self.home_pos
 
                 # 🌟 目標攻堅看門狗 (Watchdog)
+                # 🌟 目標攻堅看門狗 (Watchdog)
                 if self.state == "CLEANING" and target is not None:
                     if target != self.current_target_cache:
                         self.current_target_cache = target
                         self.target_start_time = time.time()
                     elif time.time() - self.target_start_time > WATCHDOG_TIMEOUT:
-                        print(f"🚨 [看門狗] 攻堅目標 {target} 超時 ({WATCHDOG_TIMEOUT}s)！直接放棄該網格點，倒車脫困！")
-                        self.ctx['planner'].mark_target_reached()
-                        self.current_target_cache = None
-                        target = None
+                        print(f"🚨 [看門狗] 攻堅目標 {target} 超時 ({WATCHDOG_TIMEOUT}s)！強制發送倒車指令脫困，準備重新逼近！")
+                        
+                        self.target_start_time = time.time()
+                        
                         if self.ctx.get('bt'):
+                            # ✅ 拔除 if self.last_cmd != "B" 的限制，無條件強制覆寫並發送新指令！
                             self.ctx['bt'].send_new_action("B")
                             self.last_cmd = "B"
                             self.last_send_time = time.time()
+                            self.cmd_start_time = time.time() 
                             self.retry_count = 0
-                        return # 提早結束這幀，先退後再說
+                            
+                            if self.ctx['robot'].x is not None:
+                                self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
+                                self.ack_start_angle = self.ctx['robot'].angle
+                                
+                        return
                 elif target is None:
                     self.current_target_cache = None
 
@@ -162,6 +171,9 @@ class FullControlMode(BaseMode):
                     
                     pixel_dist, target_abs_angle, delta_angle = 0.0, 0.0, 0.0
                     force_backward = False # 🌟 新增盲區倒車旗標
+
+                    # 🌟 取得當下時間 (移到前面供冷卻使用)
+                    current_time = time.time()
 
                     if target is not None:
                         # 角度永遠以 ArUco 為基準
@@ -186,29 +198,40 @@ class FullControlMode(BaseMode):
                             
                             if length_F > 0:
                                 projection = np.dot(T_vec, F_vec) / length_F
-                                # 計算橫向偏移量
                                 val = dist_T**2 - projection**2
                                 lateral_dist = np.sqrt(val) if val > 0 else 0.0
-                                
                                 marker_len = getattr(self.ctx['robot'], 'marker_pixel_length', 40)
                                 
-                                # 車腹死區：投影在車身內，且「橫向距離極小 (卡在底盤)」才強制退後
+                                # 🌟 修改：加入 Print 冷卻時間 (0.5秒)，避免瘋狂洗版
                                 if 0 <= projection <= length_F and lateral_dist < (0.8 * marker_len):
                                     force_backward = True
-                                    print(f"⚠️ [盲區防護] 目標卡在底盤下方，強制拉開！(投影:{projection:.1f}, 橫向:{lateral_dist:.1f})")
-                                # 背後死區：目標在 ArUco 後方，且距離太近
+                                    if current_time - getattr(self, 'last_blind_warn', 0) > 0.5:
+                                        print(f"⚠️ [盲區防護] 目標卡在底盤下方，強制拉開！(投影:{projection:.1f}, 橫向:{lateral_dist:.1f})")
+                                        self.last_blind_warn = current_time
                                 elif projection < 0 and dist_T < (1.5 * marker_len):
                                     force_backward = True
-                                    print(f"⚠️ [盲區防護] 目標緊貼車尾，強制拉開距離！(距離:{dist_T:.1f})")
+                                    if current_time - getattr(self, 'last_blind_warn', 0) > 0.5:
+                                        print(f"⚠️ [盲區防護] 目標緊貼車尾，強制拉開距離！(距離:{dist_T:.1f})")
+                                        self.last_blind_warn = current_time
+                    
+                    # 🌟 動態角度遲滯 (Hysteresis)
+                    dynamic_turn_thresh = TURN_ANGLE_THRESH * 1.8 if self.last_cmd == "F" else TURN_ANGLE_THRESH
 
                     # 產生新指令
-                    if self.state == "CLEANING" and target is not None:
+                    # 🌟 新增：如果還在「抵達喘息期」，強制維持煞車，不處理盲區也不產生新動作
+                    if current_time < getattr(self, 'arrive_pause_expiry', 0):
+                        new_cmd = "S"
+                    elif self.state == "CLEANING" and target is not None:
                         if not self.eraser_on:
                             new_cmd = "P"  
                         else:
                             if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_target_reached()
+                                
+                                # 🌟 核心修復：抵達目標後，強制暫停 0.6 秒。
+                                # 讓物理車體煞車，並避免下一幀的盲區 B 指令跟 S 指令在藍牙撞車！
+                                self.arrive_pause_expiry = current_time + 0.6
                                 
                                 # 🌟 貪婪吞噬：瞬間消耗掉佇列中所有已經被踩在腳底下的超近目標
                                 arrival_radius = int(ARRIVAL_DIST_BASE * current_scale)
@@ -222,7 +245,7 @@ class FullControlMode(BaseMode):
                                         
                             elif force_backward:
                                 new_cmd = "B" # 🌟 觸發盲區倒車
-                            elif abs(delta_angle) > TURN_ANGLE_THRESH:
+                            elif abs(delta_angle) > dynamic_turn_thresh:
                                 direction = "R" if delta_angle > 0 else "L"
                                 new_cmd = f"{direction}{target_abs_angle:.1f}"
                             else:
@@ -251,7 +274,7 @@ class FullControlMode(BaseMode):
                                         self.state = "VERIFYING"
                                         self.verify_timer = time.time()
                                         self.is_aligning_home = False
-                                elif abs(delta_angle) > TURN_ANGLE_THRESH:
+                                elif abs(delta_angle) > dynamic_turn_thresh:
                                     self.is_aligning_home = False
                                     direction = "R" if delta_angle > 0 else "L"
                                     new_cmd = f"{direction}{target_abs_angle:.1f}"
@@ -295,7 +318,8 @@ class FullControlMode(BaseMode):
                     # 2. 藍牙防洪閘門 (Un-ACKed Block)
                     is_blocked_by_ack = self.ctx.get('bt') and not self.ctx['bt'].is_cmd_acked and not is_override
                     if is_blocked_by_ack:
-                        if current_time - self.last_send_time < 2.0:
+                        # 🌟 [修正] 改用 cmd_start_time，不受重發機制干擾！
+                        if current_time - getattr(self, 'cmd_start_time', current_time) < 2.0:
                             new_cmd = self.last_cmd
                         else:
                             # 🌟 超時解鎖：如果等 ACK 已經超過 2 秒，強制破除死結放行新指令
@@ -313,6 +337,7 @@ class FullControlMode(BaseMode):
                         self.ctx['bt'].send_new_action(new_cmd)
                         self.last_cmd = new_cmd
                         self.last_send_time = current_time
+                        self.cmd_start_time = current_time # 🌟 [新增] 紀錄最初發送時間
                         self.retry_count = 0
                         self.ack_start_pos = (self.ctx['robot'].x, self.ctx['robot'].y)
                         self.ack_start_angle = self.ctx['robot'].angle
@@ -323,13 +348,12 @@ class FullControlMode(BaseMode):
                             self.cmd_lock_expiry = 0
                     else:
                         if self.ctx['bt'].is_cmd_acked:
-                            # ✅ [新增] 心跳包機制：
-                            # 已經收到 ACK，但如果是移動指令，每 0.4 秒偷偷重發一次維持馬達動能
+                            # ✅ 心跳包機制
                             if new_cmd[0] in ["F", "L", "R", "B"] and (current_time - self.last_send_time > 0.4):
                                 self.ctx['bt']._send_raw(new_cmd)
                                 self.last_send_time = current_time
                         else:
-                            # ❌ [原本的邏輯] 尚未 ACK，強硬重發
+                            # ❌ 尚未 ACK，強硬重發
                             if current_time - self.last_send_time > self.RETRY_COOLDOWN:
                                 if self.retry_count < self.MAX_RETRIES:
                                     self.retry_count += 1
