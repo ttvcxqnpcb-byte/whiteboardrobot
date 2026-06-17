@@ -1,5 +1,6 @@
 # planner.py
 import math
+import cv2
 
 class CleaningPlanner:
     def __init__(self, res_scale=1.0):
@@ -18,7 +19,7 @@ class CleaningPlanner:
     def _calculate_distance(self, x1, y1, x2, y2):
         return math.hypot(x2 - x1, y2 - y1)
 
-    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None):
+    def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None, ink_mask=None):
         """拍下快照，將所有矩形網格化並計算最佳走訪路徑"""
         self.current_target = None
         self.task_queue.clear()
@@ -60,7 +61,23 @@ class CleaningPlanner:
                 # 將獨立抓出來的 X 與 Y 點進行交乘組合
                 for px in x_points:
                     for py in y_points:
-                        raw_points.append((px, py))
+                        if ink_mask is not None:
+                            # 建立一個該網格點周圍的搜索區塊 (大小為 step_size)
+                            r = self.step_size // 2
+                            h_img, w_img = ink_mask.shape
+                            
+                            # 確保不超出圖片邊界
+                            y1, y2 = max(0, py - r), min(h_img, py + r)
+                            x1, x2 = max(0, px - r), min(w_img, px + r)
+                            
+                            # 挖出這個網格的小區塊
+                            roi = ink_mask[y1:y2, x1:x2]
+                            
+                            # 🌟 如果這個網格內有白點 (也就是真的有筆跡)，才把它加入清單！
+                            if roi.size > 0 and cv2.countNonZero(roi) > 0:
+                                raw_points.append((px, py))
+                        else:
+                            raw_points.append((px, py))
 
         if not raw_points:
             return False

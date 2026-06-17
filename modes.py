@@ -74,6 +74,7 @@ class FullControlMode(BaseMode):
 
         # 這裡依然每幀辨識，但不再即時干擾清潔規劃
         ink_mask = self.ctx['vision'].get_ink_clean_mask(frame, robot_mask_pts=robot_mask_pts, roi_polygon=self.ctx['roi_polygon'])
+        self.ctx['latest_ink_mask'] = ink_mask
         dirty_rects = self.ctx['extractor'].extract_dirty_rects(ink_mask)
         self.ctx['whiteboard'].update_dirty_matrix(dirty_rects)
 
@@ -119,6 +120,8 @@ class FullControlMode(BaseMode):
                     if time.time() - self.verify_timer > 2.0:
                         dirty_list = self.ctx['whiteboard'].get_dirty_list()
                         if self.ctx['planner'].reset_count < MAX_RESETS:
+                            ink_mask = self.ctx.get('latest_ink_mask', None) # 🌟 取出 mask
+                            has_tasks = self.ctx['planner'].generate_task_queue(dirty_list, nav_x, nav_y, current_marker_length=None, ink_mask=ink_mask)
                             has_tasks = self.ctx['planner'].generate_task_queue(dirty_list, nav_x, nav_y)
                             if has_tasks:
                                 self.ctx['planner'].reset_count += 1
@@ -452,6 +455,14 @@ class FullControlMode(BaseMode):
                     print("✨ 畫面很乾淨，不需要擦拭！")
             else:
                 print("\n❌ [錯誤] 尚未辨識到車體標籤！")
+
+            marker_length = getattr(self.ctx['robot'], 'marker_pixel_length', None)
+            ink_mask = self.ctx.get('latest_ink_mask', None) 
+                
+            # 🌟 傳入 ink_mask
+            has_tasks = self.ctx['planner'].generate_task_queue(
+                dirty_list, self.ctx['robot'].x, self.ctx['robot'].y, marker_length, ink_mask
+            )
 
         elif key == ord('p'):
             print("\n⏸️ [Mode 0] 暫停待機")
