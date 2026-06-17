@@ -1,4 +1,4 @@
-# modes.py 
+# modes.py 97+11
 import cv2
 import time
 from abc import ABC, abstractmethod
@@ -216,7 +216,7 @@ class FullControlMode(BaseMode):
                     elif self.last_cmd == "F":
                         dynamic_turn_thresh = TURN_ANGLE_THRESH * 1.8
                     else:
-                        dynamic_turn_thresh = TURN_ANGLE_THRESHc_turn_thresh = TURN_ANGLE_THRESH * 1.8 if self.last_cmd == "F" else TURN_ANGLE_THRESH
+                        dynamic_turn_thresh = TURN_ANGLE_THRESH
 
                     # 產生新指令
                     # 🌟 新增：如果還在「抵達喘息期」，強制維持煞車，不處理盲區也不產生新動作
@@ -294,33 +294,49 @@ class FullControlMode(BaseMode):
                                 new_cmd = "S"
                     else:
                         new_cmd = "S"
-
-                    # 防撞智能圍籬
+                    """
+                   # 防撞智能圍籬 (🌟 優化版：極簡 ArUco 碰撞箱 + 優先轉向脫困)
                     if target is not None:
-                        box_pts = getattr(self.ctx['robot'], 'box_3d_pts', None)
-                        if box_pts is not None and len(box_pts) == 8:
-                            # 🌟 利用 3D 底盤四個角落投影點進行極致精準的撞牆偵測 (轉為 float 相容 OpenCV)
-                            dist_fl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[0][0]), float(box_pts[0][1])), True)
-                            dist_fr = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[1][0]), float(box_pts[1][1])), True)
-                            dist_br = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[2][0]), float(box_pts[2][1])), True)
-                            dist_bl = cv2.pointPolygonTest(self.cached_roi_array, (float(box_pts[3][0]), float(box_pts[3][1])), True)
-                            
-                            dist_front = min(dist_fl, dist_fr) # 車頭風險取左右前角最小值
-                            dist_back = min(dist_br, dist_bl)  # 車尾風險取左右後角最小值
-                        else:
-                            # 備援方案
-                            dist_front = cv2.pointPolygonTest(self.cached_roi_array, (nav_x, nav_y), True)
-                            dist_back = cv2.pointPolygonTest(self.cached_roi_array, (nav_aruco_x, nav_aruco_y), True)
-
                         safe_margin = int(SAFE_MARGIN_BASE * current_scale)
-                        if (0 <= dist_front < safe_margin) or (0 <= dist_back < safe_margin):
-                            if dist_front < dist_back:
-                                print(f"🛑 [智能圍籬] 真實物理車頭面壁，強制倒車迴避！")
-                                new_cmd = "B"
-                            else:
-                                print(f"🛑 [智能圍籬] 真實物理車尾靠牆，強制前進脫離！")
-                                new_cmd = "F"
+                        # 🌟 動態縮圈：如果離目標已經很近了，自動放寬安全距離，允許貼邊停靠！
+                        dynamic_safe_margin = min(safe_margin, max(0, int(pixel_dist * 0.4)))
 
+                        aruco_pts = getattr(self.ctx['robot'], 'proj_aruco_corners', None)
+                        if aruco_pts is not None and len(aruco_pts) == 4:
+                            # 🌟 只用 ArUco 標籤的四個投影角點作為碰撞箱
+                            dist_0 = cv2.pointPolygonTest(self.cached_roi_array, (float(aruco_pts[0][0]), float(aruco_pts[0][1])), True)
+                            dist_1 = cv2.pointPolygonTest(self.cached_roi_array, (float(aruco_pts[1][0]), float(aruco_pts[1][1])), True)
+                            dist_2 = cv2.pointPolygonTest(self.cached_roi_array, (float(aruco_pts[2][0]), float(aruco_pts[2][1])), True)
+                            dist_3 = cv2.pointPolygonTest(self.cached_roi_array, (float(aruco_pts[3][0]), float(aruco_pts[3][1])), True)
+                            
+                            dist_front = min(dist_0, dist_1) 
+                            dist_back = min(dist_2, dist_3)  
+                        else:
+                            # 備援方案：如果連角點都沒算出來，退回中心點
+                            dist_front = cv2.pointPolygonTest(self.cached_roi_array, (nav_aruco_x, nav_aruco_y), True)
+                            dist_back = dist_front
+
+                        # 觸發圍籬判定
+                        if (0 <= dist_front < dynamic_safe_margin) or (0 <= dist_back < dynamic_safe_margin):
+                            # 🌟 轉向特化：如果目標角度還沒對齊，優先讓它原地轉向調整，禁止無腦後退！
+                            if abs(delta_angle) > dynamic_turn_thresh:
+                                direction = "R" if delta_angle > 0 else "L"
+                                new_cmd = f"{direction}{target_abs_angle:.1f}"
+                                print(f"🛑 [智能圍籬] 貼邊調整姿態，優先啟動原地轉向！")
+                            else:
+                                if dist_front < dist_back:
+                                    print(f"🛑 [智能圍籬] ArUco 前緣太靠近邊界，強制後退！")
+                                    new_cmd = "B"
+                                else:
+                                    print(f"🛑 [智能圍籬] ArUco 後緣太靠近邊界，強制前進！")
+                                    new_cmd = "F"
+                    """
+                    # 🌟【全新防卡死特化】突破 IMU 與視覺的絕對視角差異死結
+                    # 如果筆電算出來的轉向指令跟上一次完全一樣，而且車子已經 ACK (代表車子自認轉完了)
+                    # 這時候絕對不能再傳一樣的角度，強制放行 "F" 打破透視錯覺！
+                    if new_cmd[0] in ['L', 'R'] and new_cmd == self.last_cmd and self.ctx.get('bt') and self.ctx['bt'].is_cmd_acked:
+                        print(f"⚠️ [防卡死] 車體 IMU 已達 {new_cmd} 但視覺仍有落差，強制前進打破僵局！")
+                        new_cmd = "F"
                     # ==========================================
                     # 🌟 終極發送指令機制 (防震盪 + 防洪 + 狀態鎖)
                     # ==========================================
