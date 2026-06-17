@@ -1,6 +1,6 @@
 # config/system_settings.py
 
-CAMERA_ID = 1
+CAMERA_ID = 0
 
 BLUETOOTH_PORT = '/dev/tty.usbserial-140'
 

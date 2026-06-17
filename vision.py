@@ -17,7 +17,8 @@ class VisionManager:
         _, aruco_mask = cv2.threshold(gray, ARUCO_THRESH, 255, cv2.THRESH_BINARY)        
         return aruco_mask
 
-    def get_ink_clean_mask(self, frame, robot_mask_pts=None, roi_polygon=None):
+    # 🌟 [修改] 增加 exclude_bboxes 參數
+    def get_ink_clean_mask(self, frame, robot_mask_pts=None, roi_polygon=None, exclude_bboxes=None):
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (self.blur_ksize, self.blur_ksize), 0)
@@ -34,6 +35,11 @@ class VisionManager:
         # 直接使用傳入的遮罩座標塗黑
         if robot_mask_pts is not None:
             cv2.fillPoly(ink_thresh, [robot_mask_pts], 0)
+            
+        # 🌟 [新增] 將使用者框選的保留區塗黑，無視裡面的筆跡
+        if exclude_bboxes is not None and len(exclude_bboxes) > 0:
+            for (ex, ey, ew, eh) in exclude_bboxes:
+                cv2.rectangle(ink_thresh, (ex, ey), (ex + ew, ey + eh), 0, -1)
             
         if roi_polygon is not None:
             ink_thresh = cv2.bitwise_and(ink_thresh, roi_mask)

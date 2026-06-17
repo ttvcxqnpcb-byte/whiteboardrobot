@@ -6,9 +6,18 @@ class Visualizer:
     def __init__(self, roi_polygon):
         self.roi_pts = np.array([roi_polygon], dtype=np.int32)
 
-    def draw_hud(self, frame, robot, whiteboard, planner, aruco_corners, dirty_rects, robot_mask_pts=None):        
+    # 🌟 [修改] 增加 exclude_bboxes 參數
+    def draw_hud(self, frame, robot, whiteboard, planner, aruco_corners, dirty_rects, robot_mask_pts=None, exclude_bboxes=None):        
         overlay = frame.copy()
         cv2.fillPoly(overlay, self.roi_pts, (0, 255, 0))
+        
+        # 🌟 [新增] 繪製使用者框選的保留禁區 (紅色半透明矩形與警告標示)
+        if exclude_bboxes is not None and len(exclude_bboxes) > 0:
+            for (ex, ey, ew, eh) in exclude_bboxes:
+                cv2.rectangle(overlay, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), -1) 
+                cv2.rectangle(frame, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), 2)    
+                cv2.putText(frame, "KEEP OUT", (ex, ey - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
         cv2.addWeighted(overlay, 0.12, frame, 0.88, 0, frame)
         cv2.polylines(frame, self.roi_pts, isClosed=True, color=(0, 255, 0), thickness=2)
 

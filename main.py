@@ -13,7 +13,7 @@ try:
     from bluetooth import BTInterface
     BT_AVAILABLE = True
 except ImportError:
-    print("⚠️ 找不到 bluetooth.py，藍牙控制將無法正常運作。")
+    print(" 找不到 bluetooth.py，藍牙控制將無法正常運作。")
     BT_AVAILABLE = False
 
 
@@ -72,6 +72,16 @@ def main():
         cap.release()
         return
 
+    # 🌟 [新增] 框選不擦拭的保留區
+    ret, frame = cap.read()
+    print("\n" + "=" * 40)
+    print("🛡️ 請框選【保留區 (不擦拭的區塊)】：")
+    print("   - 滑鼠拖曳拉出矩形，按 [Space] 或 [Enter] 確認一個區塊。")
+    print("   - 可重複框選多個。完成所有框選請按 [Esc] 或 [q]。")
+    print("=" * 40)
+    exclude_bboxes = cv2.selectROIs("Select Keep-out Zones", frame, showCrosshair=True, fromCenter=False)
+    cv2.destroyWindow("Select Keep-out Zones")
+
     bt_manager = None
     if BT_AVAILABLE:
         bt_manager = BTInterface(port=BLUETOOTH_PORT)
@@ -88,6 +98,7 @@ def main():
         'planner': CleaningPlanner(RES_SCALE),
         'visualizer': Visualizer(roi_polygon),  
         'roi_polygon': roi_polygon,
+        'exclude_bboxes': exclude_bboxes, # 🌟 [新增] 將保留區矩形存入全域上下文
         'bt': bt_manager                 
     }
 
