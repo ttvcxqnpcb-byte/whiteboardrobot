@@ -397,7 +397,10 @@ class FullControlMode(BaseMode):
     def handle_key(self, key):
         if key == ord('h'):
             if self.ctx['robot'].x is not None:
-                self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
+                # 🌟 修正：優先記錄投影後的車尾點，否則才用未投影點
+                rx = self.ctx['robot'].proj_aruco_x if self.ctx['robot'].proj_aruco_x is not None else self.ctx['robot'].aruco_x
+                ry = self.ctx['robot'].proj_aruco_y if self.ctx['robot'].proj_aruco_y is not None else self.ctx['robot'].aruco_y
+                self.home_pos = (rx, ry)
                 self.home_angle = self.ctx['robot'].angle
                 print(f"\n🏠 [熱鍵設定] 更新復位基地為: {self.home_pos}")
                 
@@ -405,10 +408,12 @@ class FullControlMode(BaseMode):
             if self.ctx['robot'].x is not None:
                 print("\n▶️ [Mode 0] 拍下快照，建立任務清單！")
                 if getattr(self, 'home_pos', None) is None:
-                    self.home_pos = (self.ctx['robot'].aruco_x, self.ctx['robot'].aruco_y)
+                    # 🌟 修正：同步修改這裡的記錄方式
+                    rx = self.ctx['robot'].proj_aruco_x if self.ctx['robot'].proj_aruco_x is not None else self.ctx['robot'].aruco_x
+                    ry = self.ctx['robot'].proj_aruco_y if self.ctx['robot'].proj_aruco_y is not None else self.ctx['robot'].aruco_y
+                    self.home_pos = (rx, ry)
                     self.home_angle = self.ctx['robot'].angle
                     print(f"📍 [自動紀錄] 建立專屬基地位置: {self.home_pos}")
-                
                 dirty_list = self.ctx['whiteboard'].get_dirty_list()
                 
                 # 🌟 取得當下的標籤像素大小並傳入
