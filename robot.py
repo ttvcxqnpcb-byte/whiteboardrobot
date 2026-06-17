@@ -20,6 +20,12 @@ class Robot:
         self.last_rvec = None
         self.last_tvec = None
 
+        self.proj_x = None
+        self.proj_y = None
+        self.proj_aruco_x = None
+        self.proj_aruco_y = None
+        self.proj_aruco_corners = None
+
         # --- 1. 建立偽造的相機內部參數 (Fake Camera Matrix) ---
         # 假設一般 Webcam 視角約 60 度，焦距 f 大約等於畫面寬度
         w = 640 * res_scale
@@ -139,11 +145,31 @@ class Robot:
             # 取這些投影點的「凸包 (Convex Hull)」作為最終的 2D 遮罩多邊形
             hull = cv2.convexHull(projected_pts)
             self.mask_polygon = hull.reshape(-1, 2)
+
+            # 🌟【動態欄位擴充】解算 3D 空間投影後的實際定位座標，不破壞原始 2D 觀測值
+            # 1. 投影後的 ArUco 四個角點平面座標
+            proj_aruco_pts, _ = cv2.projectPoints(self.obj_pts, rvec, tvec, self.cam_matrix, self.dist_coeffs)
+            self.proj_aruco_corners = proj_aruco_pts.reshape(-1, 2).astype(np.int32)
+            
+            # 2. 投影後的精準實體板擦中心 (底盤前緣左右角之中點)
+            self.proj_x = int((self.box_3d_pts[4][0] + self.box_3d_pts[5][0]) / 2)
+            self.proj_y = int((self.box_3d_pts[4][1] + self.box_3d_pts[5][1]) / 2)
+            
+            # 3. 投影後的精準實體車尾基準點 (底盤後緣左右角之中點)
+            self.proj_aruco_x = int((self.box_3d_pts[6][0] + self.box_3d_pts[7][0]) / 2)
+            self.proj_aruco_y = int((self.box_3d_pts[6][1] + self.box_3d_pts[7][1]) / 2)
         else:
             self.mask_polygon = None
             self.box_3d_pts = None
             self.last_rvec = None
             self.last_tvec = None
+            
+            # 姿態解算遺失時的安全性清空
+            self.proj_x = None
+            self.proj_y = None
+            self.proj_aruco_x = None
+            self.proj_aruco_y = None
+            self.proj_aruco_corners = None
 
     def update_target(self, target_x, target_y):
         self.has_target = True

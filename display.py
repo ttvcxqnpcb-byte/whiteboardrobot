@@ -40,16 +40,29 @@ class Visualizer:
             cv2.drawMarker(frame, (tx, ty), (0, 165, 255), cv2.MARKER_CROSS, 15, 2)
 
         if aruco_corners is not None:
+            # 🔴 1. 繪製原始 2D 偵測資訊 (紅色外框、藍色車尾、黃色板擦中心)
             cv2.polylines(frame, [np.array(aruco_corners, dtype=np.int32)], isClosed=True, color=(0, 0, 255), thickness=2)
             cv2.circle(frame, (robot.aruco_x, robot.aruco_y), 4, (255, 0, 0), -1)
             cv2.circle(frame, (robot.x, robot.y), 4, (0, 255, 255), -1)
             cv2.line(frame, (robot.aruco_x, robot.aruco_y), (robot.x, robot.y), (255, 255, 255), 1)
+            
+            # 🟢 2. 繪製 3D 空間投影校正後的實體定位資訊 (綠色外框、青色實體車尾、橘色實體板擦)
+            if getattr(robot, 'proj_aruco_corners', None) is not None:
+                cv2.polylines(frame, [robot.proj_aruco_corners], isClosed=True, color=(0, 255, 0), thickness=2)
+            if getattr(robot, 'proj_aruco_x', None) is not None and getattr(robot, 'proj_aruco_y', None) is not None:
+                cv2.circle(frame, (robot.proj_aruco_x, robot.proj_aruco_y), 4, (255, 255, 0), -1) # 青色車尾
+            if getattr(robot, 'proj_x', None) is not None and getattr(robot, 'proj_y', None) is not None:
+                cv2.circle(frame, (robot.proj_x, robot.proj_y), 4, (0, 165, 255), -1) # 橘色板擦
+                if robot.proj_aruco_x is not None:
+                    cv2.line(frame, (robot.proj_aruco_x, robot.proj_aruco_y), (robot.proj_x, robot.proj_y), (0, 255, 0), 1)
         
         if robot_mask_pts is not None:
             cv2.polylines(frame, [robot_mask_pts], isClosed=True, color=(255, 0, 255), thickness=2)
             cv2.putText(frame, "Mask Area", tuple(robot_mask_pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
 
-        status_text = f"Pos:({robot.x},{robot.y}) Ang:{robot.angle:.1f} | Dirty Cells: {whiteboard.get_dirty_count()}"
+        curr_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
+        curr_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
+        status_text = f"Pos:({curr_x},{curr_y}) Ang:{robot.angle:.1f} | Dirty Cells: {whiteboard.get_dirty_count()}"
         cv2.putText(frame, status_text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         if planner.current_target:
