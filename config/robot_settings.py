@@ -47,7 +47,7 @@ VISUAL_COMP_ANGLE = 5.
 #   (Planner & Grid)
 # ==========================
 # 板擦有效覆蓋寬度 (px)，用於將大塊髒污網格化切碎
-ERASER_ARUCO_RATIO = 0.7
+ERASER_ARUCO_RATIO = 0.6
 # 頑固污漬重試次數上限 (二階段複檢的補刀次數)
 MAX_RESETS = 1
 # 目標攻堅超時時間 - 秒 (解決幽靈目標卡死)
