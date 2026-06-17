@@ -145,7 +145,10 @@ class FullControlMode(BaseMode):
                     if target is None:
                         print("🏁 清單走訪完畢！準備退回基地...")
                         self.state = "RETURNING"
-                        target = self.home_pos
+                        self.ctx['planner'].generate_return_path(nav_aruco_x, nav_aruco_y, self.home_pos[0], self.home_pos[1])
+                        target = self.ctx['planner'].get_current_target()
+                        if target is None: 
+                            target = self.home_pos # 防呆
 
                 if self.state == "CLEANING" and target is not None:
                     if target != self.current_target_cache:
@@ -258,7 +261,14 @@ class FullControlMode(BaseMode):
                                         self.is_aligning_home = False
                                 else:
                                     if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
-                                        self.is_aligning_home = True
+                                        self.ctx['planner'].mark_target_reached()
+                                        self.arrive_pause_expiry = current_time + 0.3 # 抵達中繼點停頓 0.3 秒，讓路徑更穩定
+                                        new_cmd = "S"
+                                        
+                                        # 如果沒有下一個點了，代表真的到家了，啟動回正機制
+                                        if not self.ctx['planner'].task_queue and self.ctx['planner'].current_target is None:
+                                            self.is_aligning_home = True
+                                            print("🏠 [準備復位] 抵達基地座標，開始回正角度...")
 
                                 if self.is_aligning_home:
                                     angle_diff = self.home_angle - self.ctx['robot'].angle

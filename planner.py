@@ -10,6 +10,7 @@ class CleaningPlanner:
         self.task_queue = []
         self.reset_count = 0
         
+        self.is_returning = False
         # 🌟 [新增] 存放不擦拭的保留區與安全距離
         self.exclude_bboxes = []
         try:
@@ -80,8 +81,25 @@ class CleaningPlanner:
         print(f"⚠️ [Planner] 找不到完美繞路路線，採直線前往 {goal}")
         return [goal]
 
+    def generate_return_path(self, start_x, start_y, home_x, home_y):
+        """🌟 [新增] 產生回家路徑，專供 ArUco 中心定位使用"""
+        self.current_target = None
+        self.task_queue.clear()
+        self.is_returning = True  # 標記為回家模式
+        
+        curr_pos = (int(start_x), int(start_y))
+        goal_pos = (int(home_x), int(home_y))
+        
+        # 呼叫已經過直達優化的 A* 演算法
+        path = self._a_star_search(curr_pos, goal_pos)
+        self.task_queue.extend(path)
+        
+        print(f"[Planner] 🏠 回家路線已建立！共 {len(self.task_queue)} 個避障中繼點。")
+        return len(self.task_queue) > 0
+    
     def generate_task_queue(self, dirty_list, start_x, start_y, current_marker_length=None, ink_mask=None):
         """拍下快照，將所有矩形網格化並驗證筆跡，最後計算 A* 最佳走訪路徑"""
+        self.is_returning = False
         self.current_target = None
         self.task_queue.clear()
         

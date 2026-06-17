@@ -25,9 +25,19 @@ class Visualizer:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.circle(frame, (tx, ty), 3, (0, 0, 255), -1)
 
-        # 🌟 先在畫線前，決定要用哪個點來當作連線起點 (若有投影點就用投影點)
-        start_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
-        start_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
+        # 🌟 [核心修改] 動態判斷要用哪個中心當作連線起點
+        if getattr(planner, 'is_returning', False):
+            # 回家模式：使用 ArUco 標籤中心，並設定回家專屬顏色 (粉紫色)
+            start_x = robot.proj_aruco_x if getattr(robot, 'proj_aruco_x', None) is not None else robot.aruco_x
+            start_y = robot.proj_aruco_y if getattr(robot, 'proj_aruco_y', None) is not None else robot.aruco_y
+            path_color = (255, 100, 255)  
+            target_color = (255, 0, 255)
+        else:
+            # 擦拭模式：使用板擦中心，並設定原本的擦拭顏色 (淺藍/橘色)
+            start_x = robot.proj_x if getattr(robot, 'proj_x', None) is not None else robot.x
+            start_y = robot.proj_y if getattr(robot, 'proj_y', None) is not None else robot.y
+            path_color = (255, 100, 100)  
+            target_color = (0, 165, 255)
 
         if planner.task_queue or planner.current_target:
             pts = []
@@ -35,23 +45,23 @@ class Visualizer:
                 pts.append(planner.current_target)
             pts.extend(planner.task_queue)
             
-            # 從車頭連一條線到第一個目標點 (🌟 修正起點)
+            # 從動態起點連一條線到第一個目標點
             if start_x is not None and start_y is not None and len(pts) > 0:
                 cv2.line(frame, (start_x, start_y), pts[0], (0, 255, 255), 2)
 
-            # 將序列中的任務點用線連起來，並畫出網格點
+            # 將序列中的任務點用線連起來
             for i in range(len(pts) - 1):
-                cv2.line(frame, pts[i], pts[i+1], (255, 100, 100), 2)
-                cv2.circle(frame, pts[i], 4, (255, 200, 0), -1)
+                cv2.line(frame, pts[i], pts[i+1], path_color, 2)
+                cv2.circle(frame, pts[i], 4, target_color, -1)
             
             if len(pts) > 0:
-                cv2.circle(frame, pts[-1], 4, (255, 200, 0), -1)
+                cv2.circle(frame, pts[-1], 4, target_color, -1)
                 
         if planner.current_target and start_x is not None and start_y is not None:
             tx, ty = planner.current_target
-            # (🌟 修正起點)
             cv2.line(frame, (start_x, start_y), (tx, ty), (0, 255, 255), 2)
-            cv2.drawMarker(frame, (tx, ty), (0, 165, 255), cv2.MARKER_CROSS, 15, 2)
+            cv2.drawMarker(frame, (tx, ty), target_color, cv2.MARKER_CROSS, 15, 2)
+            
         if aruco_corners is not None:
             # 🔴 1. 繪製原始 2D 偵測資訊 (紅色外框、藍色車尾、黃色板擦中心)
             cv2.polylines(frame, [np.array(aruco_corners, dtype=np.int32)], isClosed=True, color=(0, 0, 255), thickness=2)
