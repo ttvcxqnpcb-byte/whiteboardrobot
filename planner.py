@@ -10,6 +10,7 @@ class CleaningPlanner:
         self.task_queue = []
         self.reset_count = 0
         
+        self.waypoint_set = set()
         self.is_returning = False
         # 🌟 [新增] 存放不擦拭的保留區與安全距離
         self.exclude_bboxes = []
@@ -146,6 +147,11 @@ class CleaningPlanner:
         
         # 呼叫已經過直達優化的 A* 演算法
         path = self._a_star_search(curr_pos, goal_pos)
+        
+        self.waypoint_set.clear() # 🌟 每次重新規劃時清空
+        if len(path) > 1:
+            self.waypoint_set.update(path[:-1]) # 🌟 除了最後一個家，前面的點都標記為中繼點
+            
         self.task_queue.extend(path)
         
         print(f"[Planner] 🏠 回家路線已建立！共 {len(self.task_queue)} 個避障中繼點。")
@@ -227,6 +233,10 @@ class CleaningPlanner:
             
             # 使用 A* 演算法計算包含避障繞道的路徑點
             path = self._a_star_search((curr_x, curr_y), next_target)
+            
+            if len(path) > 1:
+                self.waypoint_set.update(path[:-1]) # 🌟 把 A* 繞路產生的前綴點標記為中繼點
+                
             self.task_queue.extend(path)
             
             curr_x, curr_y = next_target[0], next_target[1]

@@ -231,16 +231,21 @@ class FullControlMode(BaseMode):
                         if not self.eraser_on:
                             new_cmd = "P"  
                         else:
-                            if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                            is_waypoint = target in getattr(self.ctx['planner'], 'waypoint_set', set())
+                            arrival_radius = int(ARRIVAL_DIST_BASE * current_scale * 2.5) if is_waypoint else int(ARRIVAL_DIST_BASE * current_scale)
+                            
+                            if pixel_dist < arrival_radius:
                                 new_cmd = "S"
                                 self.ctx['planner'].mark_target_reached()
                                 
-                                self.arrive_pause_expiry = current_time + 0.6
+                                # 🌟 [滑順過彎] 中繼點不需要急煞發呆，稍微頓一下(0.1s)就繼續走；真正的髒污才停下來用力擦(0.6s)
+                                self.arrive_pause_expiry = current_time + (0.1 if is_waypoint else 0.6)
                                 
-                                arrival_radius = int(ARRIVAL_DIST_BASE * current_scale)
+                                # 底下的重疊網格點消除，保持嚴格半徑，避免誤吃真實髒污
+                                opt_radius = int(ARRIVAL_DIST_BASE * current_scale)
                                 while self.ctx['planner'].task_queue:
                                     next_pt = self.ctx['planner'].task_queue[0]
-                                    if np.hypot(self.ctx['robot'].x - next_pt[0], self.ctx['robot'].y - next_pt[1]) < arrival_radius:
+                                    if np.hypot(self.ctx['robot'].x - next_pt[0], self.ctx['robot'].y - next_pt[1]) < opt_radius:
                                         self.ctx['planner'].task_queue.pop(0)
                                         print(f"🧹 [路徑優化] 順便清除腳底下的重疊網格點: {next_pt}")
                                     else:
@@ -281,9 +286,20 @@ class FullControlMode(BaseMode):
                                         self.is_aligning_home = False
                                 else:
                                     # 尚未啟動原地回正，正在前往家或中繼點的路上
-                                    if pixel_dist < int(ARRIVAL_DIST_BASE * current_scale):
+                                    # 尚未啟動原地回正，正在前往家或中繼點的路上
+                                    is_waypoint = target in getattr(self.ctx['planner'], 'waypoint_set', set())
+                                    
+                                    # 🌟 [動態判定半徑] 回家中繼點大幅放寬，最後的家適度放寬以免對不準
+                                    if is_waypoint:
+                                        arrival_radius = int(ARRIVAL_DIST_BASE * current_scale * 2.5)
+                                    else:
+                                        arrival_radius = int(ARRIVAL_DIST_BASE * current_scale * 1.5)
+                                        
+                                    if pixel_dist < arrival_radius:
                                         self.ctx['planner'].mark_target_reached()
-                                        self.arrive_pause_expiry = current_time + 0.3 # 抵達中繼點停頓 0.3 秒，讓路徑更穩定
+                                        
+                                        # 🌟 [滑順過彎] 中繼點幾乎不停留(0.1s)，如果是到家了才停 0.3s 準備旋轉
+                                        self.arrive_pause_expiry = current_time + (0.1 if is_waypoint else 0.3)
                                         new_cmd = "S"
                                         
                                         # 如果沒有下一個點了，代表真的到家了，啟動回正機制
